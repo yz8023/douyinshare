@@ -104,6 +104,7 @@ class ClipboardMonitorService : Service() {
         running = false
         monitoring = false
         scope.cancel()
+        ClipboardParseEngine.release()
         super.onDestroy()
     }
 
