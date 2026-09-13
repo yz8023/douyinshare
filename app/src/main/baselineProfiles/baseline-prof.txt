@@ -2,14 +2,14 @@
 # 仅使用类规则（L<类名>;），覆盖启动链与常用类，
 # 让 profileinstaller 在安装后对这些类做 AOT 预编译，加速冷启动。
 
-Lcom/jn/dyparse/MainActivity;
-Lcom/jn/dyparse/DyparseApp;
-Lcom/jn/dyparse/MainActivityKt;
-Lcom/jn/dyparse/ui/theme/DyparseThemeKt;
-Lcom/jn/dyparse/ui/theme/ThemeKt;
-Lcom/jn/dyparse/ui/theme/TypeKt;
-Lcom/jn/dyparse/ui/theme/ColorKt;
-Lcom/jn/dyparse/ui/theme/MiuixComponentsKt;
+LForinxy/jiexi/MainActivity;
+LForinxy/jiexi/DyparseApp;
+LForinxy/jiexi/MainActivityKt;
+LForinxy/jiexi/ui/theme/DyparseThemeKt;
+LForinxy/jiexi/ui/theme/ThemeKt;
+LForinxy/jiexi/ui/theme/TypeKt;
+LForinxy/jiexi/ui/theme/ColorKt;
+LForinxy/jiexi/ui/theme/MiuixComponentsKt;
 
 Landroidx/compose/runtime/ComposerImpl;
 Landroidx/compose/runtime/CompositionImpl;
@@ -28,15 +28,15 @@ Landroidx/compose/material3/ButtonKt;
 Landroidx/compose/material3/IconKt;
 Landroidx/compose/material3/MaterialThemeKt;
 
-Lcom/jn/dyparse/ui/liquid/LiquidBottomTabsKt;
-Lcom/jn/dyparse/ui/liquid/DampedDragAnimationKt;
-Lcom/jn/dyparse/ui/page/ParseHistoryPageKt;
-Lcom/jn/dyparse/ui/page/BatchParsePageKt;
+LForinxy/jiexi/ui/liquid/LiquidBottomTabsKt;
+LForinxy/jiexi/ui/liquid/DampedDragAnimationKt;
+LForinxy/jiexi/ui/page/ParseHistoryPageKt;
+LForinxy/jiexi/ui/page/BatchParsePageKt;
 
-Lcom/jn/dyparse/ParserViewModel;
-Lcom/jn/dyparse/data/ParseResult;
-Lcom/jn/dyparse/data/HistoryRepository;
-Lcom/jn/dyparse/NativeLib;
+LForinxy/jiexi/ParserViewModel;
+LForinxy/jiexi/data/ParseResult;
+LForinxy/jiexi/data/HistoryRepository;
+LForinxy/jiexi/NativeLib;
 
 Lokhttp3/OkHttpClient;
 Lokhttp3/Request;

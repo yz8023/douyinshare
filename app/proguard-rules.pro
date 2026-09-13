@@ -12,11 +12,11 @@
 # ---- Gson 持久化数据模型 ----
 # 历史记录以 Gson JSON 形式存储在 Room / 文件里（字段名即 JSON 键），
 # 混淆字段名会导致升级后旧数据读不出来，因此 data 模型类+成员必须保留。
--keep class com.jn.dyparse.data.** { *; }
+-keep class Forinxy.jiexi.data.** { *; }
 
 # Gson 文件缓存的内部模型字段也保留，避免跨版本缓存失效
--keepclassmembers class com.jn.dyparse.ParserViewModel$CachedPlaybackUrl { *; }
--keepclassmembers class com.jn.dyparse.AuthorBatchManager$CachedAuthorPostRequest { *; }
+-keepclassmembers class Forinxy.jiexi.ParserViewModel$CachedPlaybackUrl { *; }
+-keepclassmembers class Forinxy.jiexi.AuthorBatchManager$CachedAuthorPostRequest { *; }
 
 # Gson 自身的反射需求
 -keep class com.google.gson.reflect.TypeToken
@@ -31,11 +31,11 @@
 -keepclasseswithmembernames,includedescriptorclasses class * {
     native <methods>;
 }
--keep class com.jn.dyparse.NativeLib { *; }
+-keep class Forinxy.jiexi.NativeLib { *; }
 
 # ---- Room ----
 # Room 运行时按类名字符串反射实例化生成的 *_Impl
--keep class com.jn.dyparse.data.local.HistoryDatabase_Impl { *; }
+-keep class Forinxy.jiexi.data.local.HistoryDatabase_Impl { *; }
 
 # ---- WebView Javascript 桥（AGP 默认规则已覆盖，显式声明双保险）----
 -keepclassmembers class * {

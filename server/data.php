@@ -653,6 +653,9 @@ class DyParser {
             foreach ($gallery as $g) $images[] = $g['image_url'];
         }
 
+        // 画质列表（含各画质估算大小），仅视频有；客户端保存前可选
+        $quality_list = ($type === 'video') ? $this->collect_quality_list($item) : [];
+
         return [
             'success' => true,
             'author' => $author,
@@ -669,6 +672,7 @@ class DyParser {
             'images' => $images,
             'gallery_media' => $gallery,
             'duration' => $duration,
+            'quality_list' => $quality_list,
             'timestamp' => $timestamp,
             'resolved_url' => $final,
             'input_url' => isset($_GET['url']) ? $_GET['url'] : '',
@@ -676,6 +680,157 @@ class DyParser {
             'auth_mode' => $use_manual ? 'cookie' : 'anon',
             'cookie_enabled' => defined('DOUYIN_COOKIE_ENABLED') && DOUYIN_COOKIE_ENABLED ? 'true' : 'false',
         ];
+    }
+
+    /**
+     * 收集作品的画质列表（供客户端在保存前展示各画质及大小，让用户选择）。
+     * 返回结构：label / ratio / url(下载直链模板) / size_bytes(估) / bit_rate。
+     * size_bytes 优先取 Douyin 返回的 data_size；缺失时用 bit_rate × 时长估算，仍为 null 表示未知。
+     * 原画质（download_addr, ratio=default）排在最前。
+     */
+    private function collect_quality_list($item) {
+        $list = [];
+        $video = (isset($item['video']) && is_array($item['video'])) ? $item['video'] : null;
+        if ($video === null) return $list;
+
+        $duration = 0.0;
+        if (isset($item['video']['duration'])) $duration = floatval($item['video']['duration']) / 1000.0;
+
+        $build_ratio_url = function ($uri, $ratio) {
+            if (!$uri) return null;
+            if (stripos($uri, 'mp3') !== false) return null;
+            if (strpos($uri, 'http') === 0) return $uri;
+            return $this->buildOriginalPlayEndpointUrl($uri, ($ratio !== null && $ratio !== '') ? $ratio : 'default');
+        };
+
+        // 1) 原画质：download_addr（ratio=default）
+        $original_uri = null;
+        if (isset($video['download_addr']['uri'])) $original_uri = $video['download_addr']['uri'];
+        elseif (isset($video['download_addr']['url_list'][0])) $original_uri = $video['download_addr']['url_list'][0];
+        $original_size = 0;
+        if (isset($video['download_addr']['data_size'])) $original_size = intval($video['download_addr']['data_size']);
+        elseif (isset($video['data_size'])) $original_size = intval($video['data_size']);
+        if ($original_uri !== null) {
+            $list[] = [
+                'label' => '原画质',
+                'ratio' => 'default',
+                'url' => $build_ratio_url($original_uri, 'default'),
+                'size_bytes' => $original_size > 0 ? $original_size : null,
+                'bit_rate' => 0,
+                'is_original' => true,
+            ];
+        } elseif (isset($video['bit_rate']) && is_array($video['bit_rate'])) {
+            // 无 download_addr 时兜底：把 bit_rate 最高档当作原画质候选
+            $best = null;
+            foreach ($video['bit_rate'] as $entry) {
+                if (!is_array($entry)) continue;
+                $h = 0;
+                if (isset($entry['play_addr']['height'])) $h = intval($entry['play_addr']['height']);
+                elseif (isset($entry['height'])) $h = intval($entry['height']);
+                if ($best === null || $h > $best['h']) $best = ['h' => $h, 'entry' => $entry];
+            }
+            if ($best !== null) {
+                $entry = $best['entry'];
+                $uri = null;
+                if (isset($entry['download_addr']['uri'])) $uri = $entry['download_addr']['uri'];
+                elseif (isset($entry['play_addr']['uri'])) $uri = $entry['play_addr']['uri'];
+                $size = 0;
+                if (isset($entry['data_size'])) $size = intval($entry['data_size']);
+                if ($uri !== null) {
+                    $list[] = [
+                        'label' => '原画质',
+                        'ratio' => 'default',
+                        'url' => $build_ratio_url($uri, 'default'),
+                        'size_bytes' => $size > 0 ? $size : null,
+                        'bit_rate' => 0,
+                        'is_original' => true,
+                    ];
+                }
+            }
+        }
+
+        // 2) bit_rate 各档位：按比例去重（同一 ratio 只保留 data_size 最大的一档）
+        if (isset($video['bit_rate']) && is_array($video['bit_rate'])) {
+            $by_ratio = [];
+            foreach ($video['bit_rate'] as $entry) {
+                if (!is_array($entry)) continue;
+                $play_addr = (isset($entry['play_addr']) && is_array($entry['play_addr'])) ? $entry['play_addr'] : null;
+                $uri = ($play_addr !== null && isset($play_addr['uri'])) ? $play_addr['uri']
+                    : (isset($entry['download_addr']['uri']) ? $entry['download_addr']['uri'] : null);
+                if (!$uri) continue;
+                $height = 0;
+                if ($play_addr !== null && isset($play_addr['height'])) $height = intval($play_addr['height']);
+                elseif (isset($entry['height'])) $height = intval($entry['height']);
+                if ($height <= 0) {
+                    $parsedH = ($play_addr !== null) ? $this->parseResolutionHeight($play_addr) : null;
+                    if ($parsedH === null) $parsedH = $this->parseResolutionHeight($entry);
+                    if ($parsedH !== null) $height = intval($parsedH);
+                }
+                $size = 0;
+                if ($play_addr !== null && isset($play_addr['data_size'])) $size = intval($play_addr['data_size']);
+                elseif (isset($entry['data_size'])) $size = intval($entry['data_size']);
+                $bit_rate = isset($entry['bit_rate']) ? intval($entry['bit_rate']) : 0;
+                $ratio = ($height > 0) ? ($height . 'p') : null;
+                $norm_ratio = $ratio !== null ? $ratio : 'default';
+
+                // 同档去重：保留 data_size 更大的（或 height 更大的）
+                if (isset($by_ratio[$norm_ratio])) {
+                    if (!isset($by_ratio[$norm_ratio]['height']) || $by_ratio[$norm_ratio]['height'] < $height) {
+                        $by_ratio[$norm_ratio] = ['uri' => $uri, 'height' => $height, 'size' => $size, 'bit_rate' => $bit_rate, 'entry' => $entry];
+                    }
+                    continue;
+                }
+                $by_ratio[$norm_ratio] = ['uri' => $uri, 'height' => $height, 'size' => $size, 'bit_rate' => $bit_rate, 'entry' => $entry];
+            }
+
+            // 排序：分辨率高的在前；原画质已在 list[0]，这里只追加 bit_rate 档
+            uksort($by_ratio, function ($a, $b) {
+                $ha = ($a === 'default') ? -1 : intval($a);
+                $hb = ($b === 'default') ? -1 : intval($b);
+                return $hb - $ha;
+            });
+            foreach ($by_ratio as $ratio => $info) {
+                $uri = $info['uri'];
+                $size = $info['size'];
+                $bit_rate = $info['bit_rate'];
+                $height = $info['height'];
+                $entry = $info['entry'];
+                $url = $build_ratio_url($uri, $ratio);
+                if (!$url) continue;
+                if ($size <= 0 && $duration > 0 && $bit_rate > 0) {
+                    $size = intval($bit_rate * $duration / 8);
+                }
+                $label = $this->quality_label_for_entry($entry, $height);
+                $list[] = [
+                    'label' => $label,
+                    'ratio' => $ratio,
+                    'url' => $url,
+                    'size_bytes' => $size > 0 ? $size : null,
+                    'bit_rate' => $bit_rate,
+                    'is_original' => false,
+                ];
+            }
+        }
+
+        return $list;
+    }
+
+    /** 从 bit_rate 条目生成画质名称：优先 gear_name / quality_desc，其次按分辨率 */
+    private function quality_label_for_entry($entry, $height) {
+        if (is_array($entry)) {
+            foreach (['gear_name', 'quality_desc'] as $k) {
+                if (isset($entry[$k]) && is_string($entry[$k]) && trim($entry[$k]) !== '') {
+                    $text = trim($entry[$k]);
+                    if (preg_match('/(?<!\d)(2160|1440|1280|1080|960|720|540|480|360)\s*p?(?!\d)/i', $text)) {
+                        return $text;
+                    }
+                }
+            }
+        }
+        if ($height > 0) {
+            return $height . 'p';
+        }
+        return '默认画质';
     }
 
     // 诊断：返回服务器版本/配置/参数解析状态（浏览器访问 data.php?diag=1）

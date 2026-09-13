@@ -262,7 +262,7 @@ base64 -w0 your-release.jks
 │   └── src/
 │       ├── main/
 │       │   ├── cpp/                   # 原生加固：反调试 / 反注入
-│       │   ├── java/com/jn/dyparse/
+│       │   ├── java/Forinxy/jiexi/
 │       │   │   ├── MainActivity.kt            # 入口 Activity
 │       │   │   ├── ParserViewModel.kt         # 核心状态机
 │       │   │   ├── ServerApiClient.kt         # 服务端单条解析 + 连接测试

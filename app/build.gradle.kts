@@ -49,13 +49,13 @@ android {
             keyPassword = signingProperty("RELEASE_KEY_PASSWORD")
         }
     }
-    namespace = "com.jn.dyparse"
+    namespace = "Forinxy.jiexi"
     compileSdk = 36
     // 固定 NDK 版本，保证本地与 CI 构建一致（CI 中按此版本安装）
     ndkVersion = "28.2.13676358"
 
     defaultConfig {
-        applicationId = "com.jn.dyparse"
+        applicationId = "Forinxy.jiexi"
         minSdk = 24
         targetSdk = 34
         versionCode = 42
