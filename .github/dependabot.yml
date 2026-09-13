@@ -1,0 +1,48 @@
+# Dependabot 配置
+#
+# ⚠️ 为什么关闭 Gradle 依赖的自动版本更新：
+#
+#   本项目固定在一条**成套验证过**的工具链上：
+#       AGP 9.0.1 / Kotlin 2.0.21 / KSP 2.0.21-1.0.28 / Gradle 9.2.1
+#   这几个必须版本对齐，任何单独升级都会构建失败。而且它们的版本号是
+#   "次版本"级别（如 Gradle 9.2.1 → 9.7.1、Kotlin 2.0.21 → 2.4.20），
+#   用"忽略主版本"拦不住，只会持续制造红色 CI 噪音。
+#
+#   要升级工具链时请手动改：
+#       gradle/libs.versions.toml
+#       gradle/wrapper/gradle-wrapper.properties
+#   并在本地跑通 ./gradlew test assembleDebug 后再提交。
+#
+#   open-pull-requests-limit: 0 = 关闭版本更新 PR。
+#   **安全更新（Dependabot security updates）不受影响**，
+#   它在仓库 Settings → Code security 里单独开关，仍会照常提醒漏洞。
+#
+#   想恢复依赖更新：把下面的 0 改回 3，并按需添加 ignore 规则。
+version: 2
+updates:
+  - package-ecosystem: gradle
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+    labels:
+      - dependencies
+
+  # GitHub Actions：保留版本更新（风险低、收益明确），但只看次版本/补丁，
+  # 并合并成单个 PR；大版本（如 checkout v4 → v7）不自动升级。
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2
+    labels:
+      - dependencies
+      - ci
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
+    groups:
+      github-actions:
+        patterns:
+          - "*"
