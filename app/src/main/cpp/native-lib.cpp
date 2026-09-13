@@ -427,7 +427,7 @@ extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
         return JNI_ERR;
     }
 
-    jclass clazz = env->FindClass("com/jn/dyparse/NativeLib");
+    jclass clazz = env->FindClass("Forinxy/jiexi/NativeLib");
     if (clazz == nullptr) {
         return JNI_ERR;
     }
