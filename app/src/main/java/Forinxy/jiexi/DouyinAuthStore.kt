@@ -35,6 +35,44 @@ object DouyinAuthStore {
         "passport_auth_status_ss"
     )
 
+    /** 保存从 App 内置登录页自动捕获的抖音登录 cookie，并推动 authRevision 刷新登录状态 UI */
+    fun saveAuthCookie(context: Context, rawCookie: String): Boolean {
+        val normalized = normalizeCookieHeader(rawCookie)
+        if (normalized.isBlank()) {
+            return false
+        }
+        context.applicationContext
+            .getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_COOKIE, normalized)
+            .apply()
+        bumpAuthRevision()
+        return true
+    }
+
+    /** 清除本地登录 cookie（不触发 DouyinCookieWebViewSync.clearAll，仅清持久化值） */
+    fun clearAuthCookie(context: Context) {
+        context.applicationContext
+            .getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .remove(KEY_COOKIE)
+            .apply()
+        bumpAuthRevision()
+    }
+
+    /** 从登录 cookie 中提取登录昵称（cookie 中是 URL 编码的 nickname 字段） */
+    fun getLoginNickname(context: Context): String? {
+        val cookie = getCookie(context) ?: return null
+        val raw = extractCookieValue(cookie, "nickname") ?: return null
+        return runCatching { java.net.URLDecoder.decode(raw, "UTF-8") }
+            .getOrNull()
+            ?.takeIf { it.isNotBlank() && it != "null" }
+    }
+
+    private fun bumpAuthRevision() {
+        _authRevision.compareAndSet(_authRevision.value, _authRevision.value + 1)
+    }
+
     fun getCookie(context: Context): String? {
         return context.applicationContext
             .getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)

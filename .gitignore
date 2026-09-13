@@ -37,3 +37,6 @@ cookie.txt
 
 # ===== 历史泄露备份（仅本地保留，勿提交）=====
 .git-leaked-backup/
+
+# 内部 Agent 记忆（含运维/凭证获取说明，勿公开）
+.monkeycode/

@@ -58,6 +58,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.automirrored.filled.ViewList
+import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.outlined.CleaningServices
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.ContentPaste
@@ -111,6 +112,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -128,6 +130,7 @@ import Forinxy.jiexi.ui.SaveProgressOverlay
 import Forinxy.jiexi.ui.LivePhotoPreviewDialog
 import Forinxy.jiexi.ui.page.BatchParsePage
 import Forinxy.jiexi.ui.page.ClipboardRecordsPage
+import Forinxy.jiexi.ui.page.DouyinLoginPage
 import Forinxy.jiexi.ui.page.ParseHistoryPage
 import Forinxy.jiexi.ui.theme.DyparseTheme
 import Forinxy.jiexi.ui.theme.MiuixAlertDialog
@@ -936,6 +939,7 @@ fun SettingsScreen(active: Boolean = true) {
     var showBatchParseSettingsDialog by rememberSaveable { mutableStateOf(false) }
     var showSaveSizeLimitDialog by rememberSaveable { mutableStateOf(false) }
     var showServerConfigDialog by rememberSaveable { mutableStateOf(false) }
+    var showDouyinLoginDialog by rememberSaveable { mutableStateOf(false) }
     var serverConfigSummary by rememberSaveable { mutableStateOf(describeServerConfig()) }
     var videoSizeLimitMb by rememberSaveable {
         mutableStateOf(SaveSizePreferences.getLimitMb(appContext))
@@ -1315,6 +1319,15 @@ fun SettingsScreen(active: Boolean = true) {
         )
     }
 
+    if (showDouyinLoginDialog) {
+        Dialog(
+            onDismissRequest = { showDouyinLoginDialog = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            DouyinLoginPage(onClose = { showDouyinLoginDialog = false })
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -1385,9 +1398,17 @@ fun SettingsScreen(active: Boolean = true) {
             }
             item {
                 SettingsItem(
+                    icon = Icons.Outlined.AccountCircle,
+                    title = "登录抖音账号",
+                    subtitle = authStatusSummary(appContext),
+                    onClick = { showDouyinLoginDialog = true }
+                )
+            }
+            item {
+                SettingsItem(
                     icon = Icons.Outlined.Cloud,
                     title = "服务器配置",
-                    subtitle = serverConfigSummary,
+                    subtitle = serverConfigSummary + serverModeSuffix(appContext),
                     onClick = { showServerConfigDialog = true }
                 )
             }
@@ -1520,6 +1541,27 @@ private fun describeServerConfig(): String {
         .getOrNull()
         ?.takeIf { it.isNotBlank() }
         ?: config.apiBase
+}
+
+/** 设置页「登录抖音账号」副标题：展示当前内置登录态 */
+private fun authStatusSummary(context: Context): String {
+    val cookie = DouyinAuthStore.getCookie(context)
+    if (cookie.isNullOrBlank()) {
+        return "未登录（本地解析需先登录）"
+    }
+    return DouyinAuthStore.getLoginNickname(context)
+        ?.let { "已登录：$it" }
+        ?: "已登录"
+}
+
+/** 服务器未配置时提示当前走本地解析 */
+private fun serverModeSuffix(context: Context): String {
+    val config = ServerConfigStore.getConfig()
+    return if (ServerConfigStore.isPlaceholder(config.apiBase)) {
+        "（当前为本地解析模式）"
+    } else {
+        ""
+    }
 }
 
 /**

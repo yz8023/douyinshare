@@ -190,6 +190,7 @@ class ParserViewModel(application: Application) : AndroidViewModel(application) 
     private var livePhotoPlayableUrlCacheLoaded = false
     private val authorBatchManager = AuthorBatchManager(application, gson, client, historyRepository)
     private val workWebApiBridge = DouyinAuthorWebApiBridge(application.applicationContext)
+    private val localParseEngine by lazy { LocalParseEngine(application) }
     private var parseJob: Job? = null
     private var batchParseJob: Job? = null
     private var parseRequestToken = 0L
@@ -765,10 +766,33 @@ class ParserViewModel(application: Application) : AndroidViewModel(application) 
         )
     }
 
-    private suspend fun performParse(input: String, useCookie: Boolean = false): ParseResult = withContext(Dispatchers.IO) {
-        // 瑙ｆ瀽閫昏緫瀹屽叏鍦ㄦ湇鍔″櫒锛欰pp 鍙皟鐢ㄦ湇鍔″櫒 API銆?
-        // 鍗曟潯瑙ｆ瀽锛氬尶鍚嶏紙useCookie=false锛夛紱鎵归噺瑙ｆ瀽锛歝ookie锛坲seCookie=true锛?
-        ServerApiClient.parse(input = input, useCookie = useCookie)
+private suspend fun performParse(input: String, useCookie: Boolean = false): ParseResult = withContext(Dispatchers.IO) {
+        serverOrLocalParse(input = input, useCookie = useCookie)
+    }
+
+    /**
+     * 解析通道选择：已配置服务器 → 走服务器（原逻辑，支持 quality_list/原画质/批量 cookie）；
+     * 未配置服务器（占位地址）→ 走 App 内置抖音登录会话本地解析（无需自建服务器）。
+     */
+    private suspend fun serverOrLocalParse(
+        input: String,
+        useCookie: Boolean = false,
+        original: Boolean = false,
+        highest: Boolean = false,
+        batchId: String? = null
+    ): ParseResult = withContext(Dispatchers.IO) {
+        val cfg = ServerConfigStore.getConfig()
+        if (ServerConfigStore.isPlaceholder(cfg.apiBase)) {
+            localParseEngine.parse(input)
+        } else {
+            ServerApiClient.parse(
+                input = input,
+                useCookie = useCookie,
+                original = original,
+                highest = highest,
+                batchId = batchId
+            )
+        }
     }
 
     /**
@@ -960,7 +984,7 @@ class ParserViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
             val qualityItem = runCatching {
-                ServerApiClient.parse(
+                serverOrLocalParse(
                     input = item.videoId,
                     useCookie = true,
                     original = wantOriginal && !wantHighest,
@@ -1199,7 +1223,7 @@ class ParserViewModel(application: Application) : AndroidViewModel(application) 
         // 鍒楄〃鐩村嚭鐨?seed 鍙兘娌℃湁濯掍綋锛氱偣鍑绘挱鏀炬椂鎵嶈В鏋愶紙鏈嶅姟鍣?cookie 妯″紡锛?
         if (item.rawPlayUrl.isNullOrBlank() && item.playUrl.isNullOrBlank()) {
             val parsed = runCatching {
-                ServerApiClient.parse(
+                serverOrLocalParse(
                     input = item.videoId,
                     useCookie = true,
                     original = false
@@ -1756,6 +1780,7 @@ class ParserViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             authorBatchManager.destroy()
             workWebApiBridge.destroy()
+            localParseEngine.destroy()
         }
         super.onCleared()
     }
