@@ -941,6 +941,10 @@ fun SettingsScreen(active: Boolean = true) {
     var showServerConfigDialog by rememberSaveable { mutableStateOf(false) }
     var showDouyinLoginDialog by rememberSaveable { mutableStateOf(false) }
     var serverConfigSummary by rememberSaveable { mutableStateOf(describeServerConfig()) }
+    var useInternalServer by rememberSaveable {
+        mutableStateOf(ServerConfigStore.isUseInternalEnabled())
+    }
+    var builtInServerPort by remember { mutableStateOf(Forinxy.jiexi.builtin.BuiltInServer.boundPort()) }
     var videoSizeLimitMb by rememberSaveable {
         mutableStateOf(SaveSizePreferences.getLimitMb(appContext))
     }
@@ -1209,10 +1213,21 @@ fun SettingsScreen(active: Boolean = true) {
                     modifier = Modifier.verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
+                    MiuixPrimaryButton(
+                        onClick = {
+                            ServerConfigStore.useInternal()
+                            useInternalServer = true
+                            serverConfigSummary = describeServerConfig()
+                            showServerConfigDialog = false
+                            Toast.makeText(context, "已切换到内置服务器，安装即用", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("使用内置服务器（无需部署，推荐）")
+                    }
                     Text(
-                        "本项目的解析逻辑全部在服务端，必须填入你自己部署的服务端信息。" +
-                            "部署方法见仓库 README 与 server/README.md。" +
-                            "三个值必须与服务端 config.php 完全一致。",
+                        "也可填写自己部署的服务端信息，三个值必须与服务端 config.php 完全一致。" +
+                            "保存外部服务器后自动关闭内置开关；想切回可点上方按钮或设置页开关。",
                         style = MaterialTheme.typography.bodySmall
                     )
                     MiuixTextField(
@@ -1405,6 +1420,19 @@ fun SettingsScreen(active: Boolean = true) {
                 )
             }
             item {
+                SettingsSwitchItem(
+                    icon = Icons.Outlined.Cloud,
+                    title = "内置解析服务器",
+                    subtitle = builtInServerStatus(appContext),
+                    checked = useInternalServer,
+                    onCheckedChange = { checked ->
+                        useInternalServer = checked
+                        ServerConfigStore.setUseInternalEnabled(checked)
+                        serverConfigSummary = describeServerConfig()
+                    }
+                )
+            }
+            item {
                 SettingsItem(
                     icon = Icons.Outlined.Cloud,
                     title = "服务器配置",
@@ -1562,11 +1590,29 @@ private fun serverModeSuffix(context: Context): String {
     val config = ServerConfigStore.getConfig()
     return when {
         ServerConfigStore.isPlaceholder(config.apiBase) ->
-            "（当前为本地解析模式）"
+            if (ServerConfigStore.isUseInternalEnabled()) {
+                "（内置服务器未就绪，暂走本地解析）"
+            } else {
+                "（未配置外部服务器）"
+            }
         ServerConfigStore.isInternal(config.apiBase) ->
             "（当前为内置服务器解析，安装即用）"
         else ->
             ""
+    }
+}
+
+/** 设置页「内置解析服务器」开关的副标题：显示运行状态与端口 */
+private fun builtInServerStatus(context: Context): String {
+    return if (Forinxy.jiexi.builtin.BuiltInServer.isRunning()) {
+        val port = Forinxy.jiexi.builtin.BuiltInServer.boundPort()
+        if (port > 0) {
+            "运行中 · 127.0.0.1:$port"
+        } else {
+            "运行中"
+        }
+    } else {
+        "未启动"
     }
 }
 

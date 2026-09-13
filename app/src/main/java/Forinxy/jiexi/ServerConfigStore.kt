@@ -20,6 +20,7 @@ object ServerConfigStore {
     private const val KEY_AUTHOR_API_BASE = "author_api_base"
     private const val KEY_TOKEN = "api_token"
     private const val KEY_HMAC_KEY = "hmac_key"
+    private const val KEY_USE_INTERNAL = "use_internal_server"
 
     /** 与 server/config.example.php 对应的四个值 */
     data class Config(
@@ -86,12 +87,46 @@ object ServerConfigStore {
             token = fallback.token,
             hmacKey = fallback.hmacKey
         )
-        return Config(
-            apiBase = prefs.stringOrNull(KEY_API_BASE) ?: internalBase ?: fallback.apiBase,
-            authorApiBase = prefs.stringOrNull(KEY_AUTHOR_API_BASE) ?: internalAuthorBase ?: fallback.authorApiBase,
-            token = prefs.stringOrNull(KEY_TOKEN) ?: fallback.token,
-            hmacKey = prefs.stringOrNull(KEY_HMAC_KEY) ?: fallback.hmacKey
-        )
+        // 用户明确配置过外部服务器 → 外部优先（内置开关不生效）
+        val userApiBase = prefs.stringOrNull(KEY_API_BASE)
+        if (userApiBase != null && !isPlaceholder(userApiBase)) {
+            return Config(
+                apiBase = userApiBase,
+                authorApiBase = prefs.stringOrNull(KEY_AUTHOR_API_BASE) ?: internalAuthorBase ?: fallback.authorApiBase,
+                token = prefs.stringOrNull(KEY_TOKEN) ?: fallback.token,
+                hmacKey = prefs.stringOrNull(KEY_HMAC_KEY) ?: fallback.hmacKey
+            )
+        }
+        // 未配置外部服务器：开关开启且内置服务器可用 → 内置
+        val useInternal = prefs.getBoolean(KEY_USE_INTERNAL, true)
+        val inner = internalBase
+        if (useInternal && inner != null) {
+            return Config(
+                apiBase = inner,
+                authorApiBase = internalAuthorBase ?: fallback.authorApiBase,
+                token = fallback.token,
+                hmacKey = fallback.hmacKey
+            )
+        }
+        return fallback
+    }
+
+    /** 是否启用内置解析服务器（默认开；用户保存外部服务器后自动关闭） */
+    fun isUseInternalEnabled(): Boolean = prefs()?.getBoolean(KEY_USE_INTERNAL, true) ?: true
+
+    fun setUseInternalEnabled(enabled: Boolean) {
+        prefs()?.edit()?.putBoolean(KEY_USE_INTERNAL, enabled)?.apply()
+    }
+
+    /** 恢复使用内置解析服务器：清空 App 内外部服务器配置并开启内置开关 */
+    fun useInternal() {
+        prefs()?.edit()
+            ?.remove(KEY_API_BASE)
+            ?.remove(KEY_AUTHOR_API_BASE)
+            ?.remove(KEY_TOKEN)
+            ?.remove(KEY_HMAC_KEY)
+            ?.putBoolean(KEY_USE_INTERNAL, true)
+            ?.apply()
     }
 
     /** 用户是否在 App 内配置过（仅用于设置页展示状态） */
@@ -103,10 +138,11 @@ object ServerConfigStore {
             ?.putString(KEY_AUTHOR_API_BASE, config.authorApiBase.trim())
             ?.putString(KEY_TOKEN, config.token.trim())
             ?.putString(KEY_HMAC_KEY, config.hmacKey.trim())
+            ?.putBoolean(KEY_USE_INTERNAL, false)
             ?.apply()
     }
 
-    /** 清除 App 内配置，回到构建时的默认值 */
+    /** 清除 App 内配置，回到构建时的默认值（内置开关复位为开启） */
     fun reset() {
         prefs()?.edit()?.clear()?.apply()
     }
