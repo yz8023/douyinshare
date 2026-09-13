@@ -50,13 +50,45 @@ object ServerConfigStore {
         hmacKey = BuildConfig.SERVER_HMAC_KEY
     )
 
-    /** 当前生效配置：App 内填过的项优先，未填的项回落到默认值 */
+    /** App 内置解析服务器的地址（在 DyparseApp 启动内置服务器后设置，进程内生效） */
+    @Volatile
+    private var internalBase: String? = null
+
+    @Volatile
+    private var internalAuthorBase: String? = null
+
+    fun setInternalBase(apiBase: String, authorApiBase: String) {
+        internalBase = apiBase
+        internalAuthorBase = authorApiBase
+    }
+
+    fun clearInternalBase() {
+        internalBase = null
+        internalAuthorBase = null
+    }
+
+    /** 当前是否使用 App 内置解析服务器（地址指向 127.0.0.1） */
+    fun isInternal(url: String): Boolean =
+        url.startsWith("http://127.0.0.1", ignoreCase = true) ||
+            url.startsWith("http://localhost", ignoreCase = true)
+
+    /**
+     * 当前生效配置：**App 内填写的值 > 内置解析服务器 > 构建时注入的默认值**。
+     *
+     * 内置服务器启动后，未配置外部服务器的用户会自动使用内置解析（安装即用）；
+     * 一旦用户在设置里填了自己的服务器，内置地址被覆盖。
+     */
     fun getConfig(): Config {
         val fallback = defaults()
-        val prefs = prefs() ?: return fallback
+        val prefs = prefs() ?: return Config(
+            apiBase = internalBase ?: fallback.apiBase,
+            authorApiBase = internalAuthorBase ?: fallback.authorApiBase,
+            token = fallback.token,
+            hmacKey = fallback.hmacKey
+        )
         return Config(
-            apiBase = prefs.stringOrNull(KEY_API_BASE) ?: fallback.apiBase,
-            authorApiBase = prefs.stringOrNull(KEY_AUTHOR_API_BASE) ?: fallback.authorApiBase,
+            apiBase = prefs.stringOrNull(KEY_API_BASE) ?: internalBase ?: fallback.apiBase,
+            authorApiBase = prefs.stringOrNull(KEY_AUTHOR_API_BASE) ?: internalAuthorBase ?: fallback.authorApiBase,
             token = prefs.stringOrNull(KEY_TOKEN) ?: fallback.token,
             hmacKey = prefs.stringOrNull(KEY_HMAC_KEY) ?: fallback.hmacKey
         )

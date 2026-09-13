@@ -1537,6 +1537,9 @@ private fun describeServerConfig(): String {
     if (ServerConfigStore.isPlaceholder(config.apiBase)) {
         return "未配置（必填）"
     }
+    if (ServerConfigStore.isInternal(config.apiBase)) {
+        return "内置服务器 127.0.0.1"
+    }
     return runCatching { java.net.URI(config.apiBase).host }
         .getOrNull()
         ?.takeIf { it.isNotBlank() }
@@ -1554,13 +1557,16 @@ private fun authStatusSummary(context: Context): String {
         ?: "已登录"
 }
 
-/** 服务器未配置时提示当前走本地解析 */
+/** 未配置外部服务器时，展示当前解析模式 */
 private fun serverModeSuffix(context: Context): String {
     val config = ServerConfigStore.getConfig()
-    return if (ServerConfigStore.isPlaceholder(config.apiBase)) {
-        "（当前为本地解析模式）"
-    } else {
-        ""
+    return when {
+        ServerConfigStore.isPlaceholder(config.apiBase) ->
+            "（当前为本地解析模式）"
+        ServerConfigStore.isInternal(config.apiBase) ->
+            "（当前为内置服务器解析，安装即用）"
+        else ->
+            ""
     }
 }
 
