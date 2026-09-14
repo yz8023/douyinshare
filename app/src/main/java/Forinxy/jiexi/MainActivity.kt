@@ -944,7 +944,15 @@ fun SettingsScreen(active: Boolean = true) {
     var useInternalServer by rememberSaveable {
         mutableStateOf(ServerConfigStore.isUseInternalEnabled())
     }
-    var builtInServerPort by remember { mutableStateOf(Forinxy.jiexi.builtin.BuiltInServer.boundPort()) }
+    val builtInServerRunning by Forinxy.jiexi.builtin.BuiltInServer.runningState.collectAsState()
+
+    // 打开设置页时确保内置服务器已启动（幂等）；启动失败则更新副标题展示原因
+    LaunchedEffect(Unit) {
+        if (useInternalServer && !builtInServerRunning) {
+            Forinxy.jiexi.builtin.BuiltInServer.start(appContext)
+            serverConfigSummary = describeServerConfig()
+        }
+    }
     var videoSizeLimitMb by rememberSaveable {
         mutableStateOf(SaveSizePreferences.getLimitMb(appContext))
     }
@@ -1423,11 +1431,14 @@ fun SettingsScreen(active: Boolean = true) {
                 SettingsSwitchItem(
                     icon = Icons.Outlined.Cloud,
                     title = "内置解析服务器",
-                    subtitle = builtInServerStatus(appContext),
+                    subtitle = builtInServerStatus(builtInServerRunning, appContext),
                     checked = useInternalServer,
                     onCheckedChange = { checked ->
                         useInternalServer = checked
                         ServerConfigStore.setUseInternalEnabled(checked)
+                        if (checked && !builtInServerRunning) {
+                            Forinxy.jiexi.builtin.BuiltInServer.start(appContext)
+                        }
                         serverConfigSummary = describeServerConfig()
                     }
                 )
@@ -1603,14 +1614,18 @@ private fun serverModeSuffix(context: Context): String {
 }
 
 /** 设置页「内置解析服务器」开关的副标题：显示运行状态与端口 */
-private fun builtInServerStatus(context: Context): String {
-    return if (Forinxy.jiexi.builtin.BuiltInServer.isRunning()) {
+private fun builtInServerStatus(running: Boolean, context: Context): String {
+    if (running) {
         val port = Forinxy.jiexi.builtin.BuiltInServer.boundPort()
-        if (port > 0) {
+        return if (port > 0) {
             "运行中 · 127.0.0.1:$port"
         } else {
             "运行中"
         }
+    }
+    val err = Forinxy.jiexi.builtin.BuiltInServer.lastError()
+    return if (!err.isNullOrBlank()) {
+        "未启动（$err）"
     } else {
         "未启动"
     }

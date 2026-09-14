@@ -27,14 +27,9 @@ class DyparseApp : Application(), ImageLoaderFactory {
         // 内置服务器仅在本进程内服务，用普通线程后台启动即可
         Thread {
             try {
+                // 注册内置解析地址由 BuiltInServer.start 内部完成
                 BuiltInServer.start(appContext)
-                if (BuiltInServer.isRunning()) {
-                    val port = BuiltInServer.boundPort()
-                    val apiBase = "http://127.0.0.1:$port/data.php"
-                    val authorApiBase = "http://127.0.0.1:$port/author_list.php"
-                    ServerConfigStore.setInternalBase(apiBase, authorApiBase)
-                    Log.i("DyparseApp", "Built-in parser ready: $apiBase")
-                }
+                Log.i("DyparseApp", "Built-in parser ready: ${BuiltInServer.boundPort()}")
             } catch (e: Exception) {
                 Log.w("DyparseApp", "Built-in server start failed", e)
             }

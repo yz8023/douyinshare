@@ -11,6 +11,9 @@ import java.net.Socket
 import java.net.URLDecoder
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * 内置解析服务器：在 App 进程内监听 127.0.0.1 的随机端口，
@@ -38,21 +41,39 @@ internal object BuiltInServer {
     @Volatile
     private var boundPort: Int = 0
 
+    /** 运行状态（Compose 可收集，驱动设置页状态显示实时刷新） */
+    private val _runningState = MutableStateFlow(false)
+
+    val runningState: StateFlow<Boolean> = _runningState.asStateFlow()
+
+    /** 启动失败原因（用于设置页展示诊断信息） */
+    @Volatile
+    private var lastError: String? = null
+
+    fun lastError(): String? = lastError
+
     /** 启动内置服务器（幂等）。线程安全，可在 Application.onCreate 调用。 */
     fun start(context: Context) {
         if (running.get()) return
         synchronized(this) {
             if (running.get()) return
-            if (parser == null) {
-                parser = BuiltInParser(context)
-            }
             try {
+                if (parser == null) {
+                    parser = BuiltInParser(context)
+                }
                 val socket = ServerSocket()
                 socket.reuseAddress = true
                 socket.bind(java.net.InetSocketAddress(InetAddress.getLoopbackAddress(), 0))
                 serverSocket = socket
                 boundPort = socket.localPort
                 running.set(true)
+                lastError = null
+                _runningState.value = true
+                // 注册为内置解析地址（任何入口启动都自动生效，无需调用方重复注册）
+                Forinxy.jiexi.ServerConfigStore.setInternalBase(
+                    "http://127.0.0.1:$boundPort/data.php",
+                    "http://127.0.0.1:$boundPort/author_list.php"
+                )
                 acceptThread = Thread({ acceptLoop(socket) }, "builtin-accept").apply {
                     isDaemon = true
                     start()
@@ -61,6 +82,8 @@ internal object BuiltInServer {
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start built-in server", e)
                 running.set(false)
+                lastError = e.message ?: e.javaClass.simpleName
+                _runningState.value = false
                 runCatching { serverSocket?.close() }
                 serverSocket = null
                 boundPort = 0
@@ -76,6 +99,7 @@ internal object BuiltInServer {
         synchronized(this) {
             if (!running.get()) return
             running.set(false)
+            _runningState.value = false
             runCatching { serverSocket?.close() }
             serverSocket = null
             acceptThread?.interrupt()
