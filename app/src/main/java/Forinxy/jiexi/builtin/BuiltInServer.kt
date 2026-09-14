@@ -3,6 +3,7 @@ package Forinxy.jiexi.builtin
 import android.content.Context
 import android.util.Log
 import java.io.BufferedReader
+import java.io.IOException
 import java.io.InputStreamReader
 import java.io.OutputStream
 import java.net.InetAddress
@@ -63,7 +64,7 @@ internal object BuiltInServer {
                 }
                 val socket = ServerSocket()
                 socket.reuseAddress = true
-                socket.bind(java.net.InetSocketAddress(InetAddress.getLoopbackAddress(), 0))
+                bindLoopback(socket)
                 serverSocket = socket
                 boundPort = socket.localPort
                 running.set(true)
@@ -94,6 +95,28 @@ internal object BuiltInServer {
     fun isRunning(): Boolean = running.get()
 
     fun boundPort(): Int = boundPort
+
+    /**
+     * 绑定到本机回环地址的随机端口。
+     *
+     * 部分设备上 getLoopbackAddress() 返回 IPv6 的 ::1，绑定会报
+     * EADDRNOTAVAIL（设备未启用 IPv6 回环）。这里显式优先 IPv4 127.0.0.1，
+     * 失败时再依次尝试 ::1 与通配回环，保证解析地址始终是 127.0.0.1。
+     */
+    private fun bindLoopback(socket: ServerSocket) {
+        val ipv4Loopback = InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1))
+        val candidates = linkedSetOf<InetAddress>(ipv4Loopback, InetAddress.getLoopbackAddress())
+        var lastError: Exception? = null
+        for (addr in candidates) {
+            try {
+                socket.bind(java.net.InetSocketAddress(addr, 0))
+                return
+            } catch (e: Exception) {
+                lastError = e
+            }
+        }
+        throw lastError ?: IOException("bind loopback failed")
+    }
 
     fun stop() {
         synchronized(this) {
