@@ -831,7 +831,7 @@ fun ParserUI(
                         }
                     }
 
-                    if (result.type == "video" && result.playUrl != null) {
+                    if ((result.type == "video" || result.type == "music") && result.playUrl != null) {
                         item(span = { GridItemSpan(3) }) {
                             VideoPlayer(
                                 url = result.playUrl,
@@ -940,7 +940,13 @@ fun ParserUI(
                                     onClick = { viewModel.saveMedia(context, result) },
                                     enabled = !isBusy
                                 ) {
-                                    Text(if (result.type == "video") "保存视频" else "保存全部图片")
+                                    Text(
+                                    text = when (result.type) {
+                                        "image" -> "保存全部图片"
+                                        "music" -> "保存音乐"
+                                        else -> "保存视频"
+                                    }
+                                )
                                 }
 
                                 if (result.type == "image" && result.galleryItems.isNotEmpty()) {

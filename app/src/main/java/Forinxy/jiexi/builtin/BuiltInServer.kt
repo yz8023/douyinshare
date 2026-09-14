@@ -37,7 +37,7 @@ internal object BuiltInServer {
     }
 
     @Volatile
-    private var parser: BuiltInParser? = null
+    private var parser: MediaParser? = null
 
     @Volatile
     private var boundPort: Int = 0
@@ -60,7 +60,7 @@ internal object BuiltInServer {
             if (running.get()) return
             try {
                 if (parser == null) {
-                    parser = BuiltInParser(context)
+                    parser = MultiPlatformParser(context)
                 }
                 val socket = ServerSocket()
                 socket.reuseAddress = true

@@ -228,7 +228,7 @@ class ParserViewModel(application: Application) : AndroidViewModel(application) 
 
         private const val SERVICE_UNAVAILABLE_MESSAGE = "\u670d\u52a1\u4e0d\u53ef\u7528"
         private const val EMPTY_INPUT_MESSAGE = "\u5185\u5bb9\u4e0d\u80fd\u4e3a\u7a7a"
-        private const val INVALID_INPUT_MESSAGE = "\u8bf7\u8f93\u5165\u6296\u97f3\u5206\u4eab\u94fe\u63a5\u6216\u4f5c\u54c1 ID"
+        private const val INVALID_INPUT_MESSAGE = "\u8bf7\u8f93\u5165\u5206\u4eab\u94fe\u63a5\u6216\u4f5c\u54c1 ID\uff08\u652f\u6301\u6296\u97f3/\u5feb\u624b/\u5c0f\u7ea2\u4e66/B\u7ad9/\u5fae\u535a/\u5934\u6761\u7b49\uff09"
         private const val INVALID_AUTHOR_INPUT_MESSAGE = "\u8bf7\u8f93\u5165\u4f5c\u8005\u4e3b\u9875\u5206\u4eab\u94fe\u63a5"
         private const val SAVE_VIDEO_PREPARE_LABEL = "\u6b63\u5728\u51c6\u5907\u89c6\u9891..."
         private const val SAVE_VIDEO_LABEL = "\u6b63\u5728\u4fdd\u5b58\u89c6\u9891..."
@@ -237,6 +237,10 @@ class ParserViewModel(application: Application) : AndroidViewModel(application) 
         private const val SAVE_VIDEO_SUCCESS = "\u89c6\u9891\u4fdd\u5b58\u6210\u529f"
         private const val SAVE_IMAGE_ALL_SUCCESS = "\u56fe\u7247\u5168\u90e8\u4fdd\u5b58\u6210\u529f"
         private const val SAVE_IMAGE_PARTIAL_FAILED = "\u90e8\u5206\u56fe\u7247\u4fdd\u5b58\u5931\u8d25"
+        private const val SAVE_MUSIC_LABEL = "\u6b63\u5728\u4fdd\u5b58\u97f3\u4e50..."
+        private const val SAVE_MUSIC_SUCCESS = "\u97f3\u4e50\u4fdd\u5b58\u6210\u529f"
+        private const val SAVE_MUSIC_FAILED = "\u4fdd\u5b58\u97f3\u4e50\u5931\u8d25\uff1a\u65e0\u6cd5\u83b7\u53d6\u97f3\u4e50\u5730\u5740"
+        private const val MUSIC_SAVE_SUBPATH = "dyparse/music"
         private const val SAVE_BATCH_ALL_SUCCESS = "\u6279\u91cf\u4fdd\u5b58\u5b8c\u6210"
         private const val SAVE_BATCH_PARTIAL_FAILED = "\u6279\u91cf\u4fdd\u5b58\u5b8c\u6210\uff0c\u4f46\u6709\u90e8\u5206\u5931\u8d25"
         private const val SAVE_BATCH_ALL_FAILED = "\u6279\u91cf\u4fdd\u5b58\u5931\u8d25"
@@ -294,8 +298,8 @@ class ParserViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         val isId = input.matches(digitsRegex)
-        val isDouyinUrl = input.contains("douyin", ignoreCase = true)
-        if (!isId && !isDouyinUrl) {
+        val detectedPlatform = Forinxy.jiexi.builtin.Platform.detect(input)
+        if (!isId && detectedPlatform == null) {
             _parseResult.value = ParseResult.Error(INVALID_INPUT_MESSAGE)
             return
         }
@@ -1605,6 +1609,75 @@ private suspend fun performParse(input: String, useCookie: Boolean = false): Par
         }
     }
 
+    /** 音乐保存：直接把解析出的音频地址落盘（dyparse/music） */
+    private suspend fun saveMusicCore(context: Context, result: ParseResult.Success) {
+        val audioUrl = result.playUrl ?: result.originalPlayUrl ?: result.rawPlayUrl
+        if (audioUrl.isNullOrBlank()) {
+            Toast.makeText(context, SAVE_MUSIC_FAILED, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val (mimeType, extension) = detectAudioUrlType(audioUrl)
+        val fileName = result.titlePrefixForFileName()
+            .let { buildBaseMediaName(it, result.author, "music") }
+
+        _saveState.value = SaveState(
+            isSaving = true,
+            total = 1,
+            current = 0,
+            progress = 0f,
+            label = SAVE_MUSIC_LABEL,
+            indeterminate = false
+        )
+
+        val success = saveFile(
+            context = context,
+            client = downloadClient,
+            url = audioUrl,
+            headers = emptyMap(),
+            mimeType = mimeType,
+            timestamp = result.timestamp,
+            fileName = fileName,
+            subPathOverride = MUSIC_SAVE_SUBPATH,
+            extensionOverride = extension
+        ) { bytes, total ->
+            if (total > 0) {
+                withContext(Dispatchers.Main.immediate) {
+                    _saveState.value = _saveState.value.copy(
+                        current = 1,
+                        progress = bytes.toFloat() / total
+                    )
+                }
+            }
+        }
+
+        _saveState.value = SaveState()
+        if (success) {
+            Toast.makeText(context, SAVE_MUSIC_SUCCESS, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun detectAudioUrlType(url: String): Pair<String, String> {
+        val lower = url.lowercase()
+        val path = runCatching { java.net.URI(url).path }.getOrNull().orEmpty()
+        val pathExt = Regex("[.]\\w+([?#]|$)").find(path)
+            ?.value?.trim('.', '?', '#')?.lowercase()
+        val ext = pathExt?.takeIf { it.length in 2..4 } ?: when {
+            lower.contains(".m4a") -> "m4a"
+            lower.contains(".aac") -> "aac"
+            lower.contains(".flac") -> "flac"
+            lower.contains(".wav") -> "wav"
+            else -> "mp3"
+        }
+        val mime = when (ext) {
+            "m4a", "mp4" -> "audio/mp4"
+            "aac" -> "audio/aac"
+            "flac" -> "audio/flac"
+            "wav" -> "audio/x-wav"
+            else -> "audio/mpeg"
+        }
+        return mime to ext
+    }
+
     fun saveMedia(
         context: Context,
         result: ParseResult.Success,
@@ -1621,6 +1694,10 @@ private suspend fun performParse(input: String, useCookie: Boolean = false): Par
         }
 
         viewModelScope.launch {
+            if (result.type == "music") {
+                saveMusicCore(context = context, result = result)
+                return@launch
+            }
             if (result.type == "video") {
                 var requestedQuality: VideoQualityOption? = null
                 // 每次下载前询问画质（开启后列出各画质大小供选择）

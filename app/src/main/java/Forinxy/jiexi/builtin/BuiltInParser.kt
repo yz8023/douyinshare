@@ -25,7 +25,9 @@ import java.util.regex.Pattern
  *  - cookie 预热（ttwid/msToken）在进程内缓存 30 分钟；mode=cookie 时合并
  *    内置登录页捕获的抖音 cookie（DouyinAuthStore）。
  */
-internal class BuiltInParser(context: Context) {
+internal class BuiltInParser(context: Context) : PlatformParser {
+
+    override val platform: Platform get() = Platform.DOUYIN
 
     private val appContext = context.applicationContext
     private val gson = Gson()
@@ -123,7 +125,7 @@ internal class BuiltInParser(context: Context) {
      * 解析单个作品，返回与服务器 data.php 一致的 JSON 字符串。
      * 失败时返回 {"success":false,"error":"..."}。
      */
-    fun parse(input: String, useCookie: Boolean, original: Boolean, highest: Boolean): String {
+    override fun parse(input: String, useCookie: Boolean, original: Boolean, highest: Boolean): String {
         val videoId = resolveVideoId(input)
             ?: return fail("无法识别作品 ID，请确认链接或分享文案有效")
         if (videoId.length < 15) {

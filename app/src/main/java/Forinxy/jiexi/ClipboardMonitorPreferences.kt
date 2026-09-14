@@ -25,26 +25,28 @@ object ClipboardMonitorPreferences {
     }
 }
 
-/** 抖音分享内容识别与剪贴板工具 */
+/** 短视频 / 图集 / 音乐分享内容识别与剪贴板工具 */
 object ClipboardShareContent {
-    private val douyinUrlRegex = Regex(
-        "https?://(v\\.|www\\.)?douyin\\.com/[\\w./=-]+",
-        RegexOption.IGNORE_CASE
-    )
+    private val shareUrlRegex = Regex("https?://[^\\s\\u4e00-\\u9fa5'\"]+")
     private val digitsRegex = Regex("^\\d{19}$")
 
-    /** 判断复制的文本是否与抖音分享相关（含 douyin 链接或纯 19 位作品 ID） */
+    /** 判断复制文本是否与任一支持平台分享相关（含各平台链接或纯 19 位抖音作品 ID） */
     fun isDouyinShare(text: String): Boolean {
         val trimmed = text.trim()
-        if (trimmed.contains("douyin", ignoreCase = true)) return true
+        val url = shareUrlRegex.find(trimmed)?.value
+        if (url != null) return isSupportedShareUrl(url)
         return digitsRegex.matches(trimmed)
     }
+
+    /** 检测 URL 是否属于支持解析的平台 */
+    fun isSupportedShareUrl(url: String): Boolean =
+        Forinxy.jiexi.builtin.Platform.detect(url) != null
 
     /** 从复制文本中提取待解析的输入（优先链接，其次整体） */
     fun extractParseInput(text: String): String? {
         val trimmed = text.trim()
-        val url = douyinUrlRegex.find(trimmed)?.value
-        if (url != null) return url
+        val url = shareUrlRegex.find(trimmed)?.value
+        if (url != null && isSupportedShareUrl(url)) return url
         if (digitsRegex.matches(trimmed)) return trimmed
         return null
     }
