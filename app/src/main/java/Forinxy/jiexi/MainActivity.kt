@@ -354,7 +354,7 @@ fun MainScreen() {
                 when (page) {
                     0 -> ParserUI(parserViewModel)
                     1 -> BatchParsePage(parserViewModel)
-                    2 -> ClipboardRecordsPage()
+                    2 -> ClipboardRecordsPage(parserViewModel = parserViewModel)
                     3 -> ParseHistoryPage(parserViewModel)
                     4 -> SettingsScreen(active = currentPage == 4)
                 }

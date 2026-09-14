@@ -82,6 +82,15 @@ class HistoryRepository(
             readBatchHistoryNoMigration()
         }
 
+    suspend fun clearParseHistory() = withContext(Dispatchers.IO) {
+        dao.clearParseHistory()
+    }
+
+    suspend fun clearBatchHistory() = withContext(Dispatchers.IO) {
+        dao.clearBatchHistoryWorks()
+        dao.clearBatchHistory()
+    }
+
     suspend fun updateBatchWork(
         item: ParseResult.Success,
         transform: (ParseResult.Success) -> ParseResult.Success

@@ -33,6 +33,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -41,8 +43,10 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
@@ -95,10 +99,26 @@ fun ParseHistoryPage(viewModel: ParserViewModel = viewModel()) {
     var selectedBatch by remember { mutableStateOf<BatchAuthorParseSummary?>(null) }
     var selectedBatchWorks by remember { mutableStateOf<List<ParseResult.Success>>(emptyList()) }
     var isLoadingBatchWorks by remember { mutableStateOf(false) }
+    var query by rememberSaveable { mutableStateOf("") }
+    var showClearConfirm by remember { mutableStateOf(false) }
     val isResumed by rememberIsResumed()
+    val context = LocalContext.current
     val closeBatchDetail = {
         selectedBatch = null
         selectedBatchWorks = emptyList()
+    }
+
+    val filteredHistory = remember(history, query) {
+        if (query.isBlank()) history else history.filter { item ->
+            item.title.contains(query.trim(), ignoreCase = true) ||
+                item.author.contains(query.trim(), ignoreCase = true) ||
+                item.videoId.contains(query.trim(), ignoreCase = true)
+        }
+    }
+    val filteredBatchHistory = remember(batchHistory, query) {
+        if (query.isBlank()) batchHistory else batchHistory.filter { item ->
+            item.author.contains(query.trim(), ignoreCase = true)
+        }
     }
 
     // 详情弹窗：historyState 始终为完整对象（含 playUrl/rawPlayUrl），
@@ -153,6 +173,14 @@ fun ParseHistoryPage(viewModel: ParserViewModel = viewModel()) {
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
                 )
 
+                HistorySearchBar(
+                    query = query,
+                    onQueryChange = { query = it },
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
                 if (selectedTab == 0) {
                     if (history.isEmpty()) {
                         EmptyHistoryState()
@@ -162,9 +190,33 @@ fun ParseHistoryPage(viewModel: ParserViewModel = viewModel()) {
                             contentPadding = floatingBottomBarContentPadding(horizontal = 12.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            items(history, key = { "${it.videoId}_${it.parseTimestamp}" }) { item ->
+                            items(filteredHistory, key = { "${it.videoId}_${it.parseTimestamp}" }) { item ->
                                 HistoryItem(item) {
                                     openDetail(item)
+                                }
+                            }
+                            item {
+                                if (filteredHistory.isEmpty()) {
+                                    Text(
+                                        text = "没有匹配的记录",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.outline,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 24.dp),
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                    )
+                                } else {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    TextButton(
+                                        onClick = { showClearConfirm = true },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            text = "清空历史记录",
+                                            color = MaterialTheme.colorScheme.error
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -178,9 +230,33 @@ fun ParseHistoryPage(viewModel: ParserViewModel = viewModel()) {
                             contentPadding = floatingBottomBarContentPadding(horizontal = 12.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            items(batchHistory, key = { it.batchId }) { item ->
+                            items(filteredBatchHistory, key = { it.batchId }) { item ->
                                 BatchHistoryItem(item) {
                                     selectedBatch = item
+                                }
+                            }
+                            item {
+                                if (filteredBatchHistory.isEmpty()) {
+                                    Text(
+                                        text = "没有匹配的记录",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.outline,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 24.dp),
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                    )
+                                } else {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    TextButton(
+                                        onClick = { showClearConfirm = true },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            text = "清空批量历史",
+                                            color = MaterialTheme.colorScheme.error
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -215,6 +291,41 @@ fun ParseHistoryPage(viewModel: ParserViewModel = viewModel()) {
             }
         )
     }
+
+    if (showClearConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirm = false },
+            title = {
+                Text(
+                    text = if (selectedTab == 0) "清空历史记录" else "清空批量历史",
+                    style = MaterialTheme.typography.titleMedium
+                )
+            },
+            text = {
+                Text("确定要清空全部${if (selectedTab == 0) "作品历史" else "批量历史"}吗？此操作不可恢复。")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (selectedTab == 0) {
+                            viewModel.clearParseHistory()
+                        } else {
+                            viewModel.clearBatchHistory()
+                        }
+                        showClearConfirm = false
+                        Toast.makeText(context, "历史已清空", Toast.LENGTH_SHORT).show()
+                    }
+                ) {
+                    Text("清空", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearConfirm = false }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
 }
 
 private fun List<ParseResult.Success>.replaceHistoryWork(
@@ -227,6 +338,51 @@ private fun List<ParseResult.Success>.replaceHistoryWork(
             item
         }
     }
+}
+
+@Composable
+private fun HistorySearchBar(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    OutlinedTextField(
+        value = query,
+        onValueChange = onQueryChange,
+        modifier = modifier
+            .fillMaxWidth()
+            .height(46.dp),
+        singleLine = true,
+        textStyle = MaterialTheme.typography.bodyMedium,
+        placeholder = {
+            Text(
+                text = "搜索标题 / 作者 / 作品 ID",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.outline
+            )
+        },
+        leadingIcon = {
+            Icon(
+                imageVector = Icons.Filled.Search,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp)
+            )
+        },
+        trailingIcon = {
+            if (query.isNotEmpty()) {
+                IconButton(onClick = { onQueryChange("") }, modifier = Modifier.size(28.dp)) {
+                    Icon(
+                        imageVector = Icons.Filled.Close,
+                        contentDescription = "清除",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        },
+        shape = RoundedCornerShape(17.dp)
+    )
 }
 
 @Composable

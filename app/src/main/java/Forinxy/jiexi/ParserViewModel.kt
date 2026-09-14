@@ -872,6 +872,24 @@ private suspend fun performParse(input: String, useCookie: Boolean = false): Par
         }
     }
 
+    fun clearParseHistory() {
+        viewModelScope.launch(Dispatchers.IO) {
+            historyRepository.clearParseHistory()
+            withContext(Dispatchers.Main.immediate) {
+                _historyState.value = emptyList()
+            }
+        }
+    }
+
+    fun clearBatchHistory() {
+        viewModelScope.launch(Dispatchers.IO) {
+            historyRepository.clearBatchHistory()
+            withContext(Dispatchers.Main.immediate) {
+                _batchHistoryState.value = emptyList()
+            }
+        }
+    }
+
 
     suspend fun getValidVideoUrl(item: ParseResult.Success): String? {
         return resolveValidVideoUrl(item).url

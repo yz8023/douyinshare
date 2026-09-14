@@ -69,6 +69,7 @@ data class ParseHistoryLightEntity(
 /**
  * 剪贴板监控记录：后台读取到的复制内容。
  * 按复制时间（copiedAt）分组展示；status 表示解析进度。
+ * cover/payloadJson 为解析成功后保存的完整结果（供卡片封面与点击详情复用）。
  */
 @Entity(tableName = "clipboard_records")
 data class ClipboardRecordEntity(
@@ -81,6 +82,8 @@ data class ClipboardRecordEntity(
     val title: String? = null,
     val author: String? = null,
     val type: String? = null,
+    val cover: String? = null,
+    val payloadJson: String? = null,
     val parseError: String? = null,
     val parsedAt: Long? = null
 )
@@ -135,11 +138,20 @@ interface HistoryDao {
     @Query("SELECT COUNT(*) FROM parse_history")
     suspend fun getParseHistoryCount(): Int
 
+    @Query("DELETE FROM parse_history")
+    suspend fun clearParseHistory()
+
     @Query("SELECT * FROM batch_history ORDER BY parseTimestamp DESC")
     suspend fun getBatchHistory(): List<BatchHistoryEntity>
 
     @Query("SELECT COUNT(*) FROM batch_history")
     suspend fun getBatchHistoryCount(): Int
+
+    @Query("DELETE FROM batch_history_works")
+    suspend fun clearBatchHistoryWorks()
+
+    @Query("DELETE FROM batch_history")
+    suspend fun clearBatchHistory()
 
     @Query("SELECT * FROM batch_history_works WHERE batchId = :batchId ORDER BY position ASC")
     suspend fun getBatchHistoryWorks(batchId: String): List<BatchHistoryWorkEntity>
@@ -185,7 +197,8 @@ interface HistoryDao {
 
     @Query(
         "UPDATE clipboard_records SET status = :status, videoId = :videoId, title = :title, " +
-            "author = :author, type = :type, parseError = :parseError, parsedAt = :parsedAt WHERE id = :id"
+            "author = :author, type = :type, cover = :cover, payloadJson = :payloadJson, " +
+            "parseError = :parseError, parsedAt = :parsedAt WHERE id = :id"
     )
     suspend fun updateClipboardRecord(
         id: Long,
@@ -194,6 +207,8 @@ interface HistoryDao {
         title: String?,
         author: String?,
         type: String?,
+        cover: String?,
+        payloadJson: String?,
         parseError: String?,
         parsedAt: Long?
     )
@@ -212,7 +227,7 @@ interface HistoryDao {
         BatchHistoryWorkEntity::class,
         ClipboardRecordEntity::class
     ],
-    version = 3,
+    version = 4,
     // Schema export is disabled because this app has no external migration
     // tooling; Room still validates the schema at compile time.
     exportSchema = false
@@ -231,7 +246,7 @@ abstract class HistoryDatabase : RoomDatabase() {
                     HistoryDatabase::class.java,
                     "dyparse_history.db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                     .build()
                     .also { instance = it }
             }
@@ -272,6 +287,14 @@ abstract class HistoryDatabase : RoomDatabase() {
                         "parseError TEXT, " +
                         "parsedAt INTEGER)"
                 )
+            }
+        }
+
+        /** v3 → v4：剪贴板记录表新增封面与完整解析结果列 */
+        private val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE clipboard_records ADD COLUMN cover TEXT")
+                db.execSQL("ALTER TABLE clipboard_records ADD COLUMN payloadJson TEXT")
             }
         }
     }

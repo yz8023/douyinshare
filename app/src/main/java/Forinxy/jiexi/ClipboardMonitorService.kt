@@ -14,6 +14,7 @@ import android.os.IBinder
 import Forinxy.jiexi.data.local.ClipboardRecordEntity
 import Forinxy.jiexi.data.local.HistoryDatabase
 import Forinxy.jiexi.data.ParseResult
+import com.google.gson.Gson
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -73,6 +74,9 @@ class ClipboardMonitorService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private lateinit var clipboardManager: ClipboardManager
+
+    /** 完整解析结果序列化（卡片详情复用） */
+    private val gson = Gson()
 
     /** 内容哈希 → 首次处理时间，用于窗口去重 */
     private val seenTimes = HashMap<String, Long>()
@@ -196,13 +200,16 @@ class ClipboardMonitorService : Service() {
         }
 
         val success = result is ParseResult.Success
+        val successItem = result as? ParseResult.Success
         db.historyDao().updateClipboardRecord(
             id = id,
             status = if (success) STATUS_DONE else STATUS_FAILED,
-            videoId = (result as? ParseResult.Success)?.videoId,
-            title = (result as? ParseResult.Success)?.title,
-            author = (result as? ParseResult.Success)?.author,
-            type = (result as? ParseResult.Success)?.type,
+            videoId = successItem?.videoId,
+            title = successItem?.title,
+            author = successItem?.author,
+            type = successItem?.type,
+            cover = successItem?.cover,
+            payloadJson = successItem?.let { runCatching { gson.toJson(it) }.getOrNull() },
             parseError = (result as? ParseResult.Error)?.msg,
             parsedAt = if (success) System.currentTimeMillis() else null
         )
