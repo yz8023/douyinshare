@@ -308,6 +308,8 @@ fun MainScreen() {
     }
     val pagerState = rememberPagerState(pageCount = { navigationItems.size })
     val mainPagerState = rememberMainPagerState(pagerState)
+    // 剪贴板/历史页「跳回首页解析」请求：非空时首页填充该文本并自动解析
+    var pendingHomeParse by remember { mutableStateOf<String?>(null) }
     val currentPage = pagerState.currentPage
     val currentRoute = navigationItems[mainPagerState.selectedPage].route
     val surfaceColor = MaterialTheme.colorScheme.background
@@ -352,9 +354,19 @@ fun MainScreen() {
                 key = { navigationItems[it].route }
             ) { page ->
                 when (page) {
-                    0 -> ParserUI(parserViewModel)
+                    0 -> ParserUI(
+                        viewModel = parserViewModel,
+                        externalParseInput = pendingHomeParse,
+                        onExternalParseConsumed = { pendingHomeParse = null }
+                    )
                     1 -> BatchParsePage(parserViewModel)
-                    2 -> ClipboardRecordsPage(parserViewModel = parserViewModel)
+                    2 -> ClipboardRecordsPage(
+                        parserViewModel = parserViewModel,
+                        onOpenInHome = { record ->
+                            pendingHomeParse = record.content
+                            mainPagerState.animateToPage(0)
+                        }
+                    )
                     3 -> ParseHistoryPage(parserViewModel)
                     4 -> SettingsScreen(active = currentPage == 4)
                 }
@@ -504,6 +516,46 @@ fun MainScreen() {
                 }
             )
         }
+
+        // 首页粘贴了作者主页链接：引导跳转批量解析页
+        val homepageLink = parserViewModel.homepageLinkDetected.value
+        if (homepageLink != null) {
+            MiuixAlertDialog(
+                onDismissRequest = { parserViewModel.clearHomepageLinkDetected() },
+                title = { Text("检测到作者主页链接") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            "该链接是作者主页（非单个作品），可切换到「作者主页批量解析」页解析 TA 的全部作品。"
+                        )
+                        Text(
+                            homepageLink.second,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                },
+                confirmButton = {
+                    MiuixPrimaryButton(
+                        onClick = {
+                            parserViewModel.clearHomepageLinkDetected()
+                            mainPagerState.animateToPage(1)
+                        }
+                    ) {
+                        Text("去批量解析")
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { parserViewModel.clearHomepageLinkDetected() }
+                    ) {
+                        Text("取消")
+                    }
+                }
+            )
+        }
     }
 }
 
@@ -635,7 +687,11 @@ private fun LiquidGlassNavigationBar(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun ParserUI(viewModel: ParserViewModel) {
+fun ParserUI(
+    viewModel: ParserViewModel,
+    externalParseInput: String? = null,
+    onExternalParseConsumed: () -> Unit = {}
+) {
     var text by rememberSaveable { mutableStateOf("") }
     val parseResult by viewModel.parseResult
     val saveState by viewModel.saveState
@@ -652,6 +708,15 @@ fun ParserUI(viewModel: ParserViewModel) {
             indication = null,
             onClick = onClick
         )
+    }
+
+    // 外部（剪贴板/历史页）跳回首页的解析请求：填充输入框并自动解析
+    LaunchedEffect(externalParseInput) {
+        val input = externalParseInput ?: return@LaunchedEffect
+        val parseInput = ClipboardShareContent.extractParseInput(input) ?: input
+        text = parseInput
+        onExternalParseConsumed()
+        viewModel.parse(parseInput)
     }
 
     val isParsing = parseResult is ParseResult.Loading

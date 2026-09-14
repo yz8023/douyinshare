@@ -143,6 +143,17 @@ class ParserViewModel(application: Application) : AndroidViewModel(application) 
     private val _saveState = mutableStateOf(SaveState())
     val saveState: State<SaveState> = _saveState
 
+    /**
+     * 用户粘贴的是作者主页链接（/share/user/ 或 /user/ 等）时置为（原始输入, 提取到的主页链接），
+     * 用于引导跳转到批量解析页解析该作者全部作品；置空表示无待引导主页链接。
+     */
+    private val _homepageLinkDetected = mutableStateOf<Pair<String, String>?>(null)
+    val homepageLinkDetected: State<Pair<String, String>?> = _homepageLinkDetected
+
+    fun clearHomepageLinkDetected() {
+        _homepageLinkDetected.value = null
+    }
+
     /** 淇濆瓨鍓嶅ぇ灏忕‘璁わ紙UI 瑙傚療姝ょ姸鎬佸脊绐楋級 */
     private val _sizeConfirmRequest = mutableStateOf<SaveSizeConfirmRequest?>(null)
     val sizeConfirmRequest: State<SaveSizeConfirmRequest?> = _sizeConfirmRequest
@@ -151,6 +162,8 @@ class ParserViewModel(application: Application) : AndroidViewModel(application) 
         _sizeConfirmRequest.value?.continuation?.complete(continueSave)
         _sizeConfirmRequest.value = null
     }
+
+    private val mobileUserAgent: String by lazy { Forinxy.jiexi.NativeLib.getParserUserAgent() }
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -285,6 +298,13 @@ class ParserViewModel(application: Application) : AndroidViewModel(application) 
             return
         }
 
+        // 显式作者主页链接（/share/user/ 或 /user/）不是单个作品，直接引导跳批量解析页
+        detectExplicitHomepageLink(input)?.let { homepageLink ->
+            _homepageLinkDetected.value = homepageLink
+            _parseResult.value = ParseResult.Idle
+            return
+        }
+
         _parseResult.value = ParseResult.Loading
         _videoQualityOptions.value = null
 
@@ -292,6 +312,14 @@ class ParserViewModel(application: Application) : AndroidViewModel(application) 
         parseJob = viewModelScope.launch {
             val startTime = System.currentTimeMillis()
             try {
+                // 短链需跟随重定向才能确认是否主页：在后台检测，命中则改为引导提示
+                detectHomepageViaRedirect(input)?.let { homepageLink ->
+                    if (requestToken == parseRequestToken) {
+                        _homepageLinkDetected.value = homepageLink
+                        _parseResult.value = ParseResult.Idle
+                    }
+                    return@launch
+                }
                 var result = performParse(input, useCookie = true)
                 val parseDurationMs = System.currentTimeMillis() - startTime
                 val duration = parseDurationMs / 1000.0
@@ -792,14 +820,75 @@ private suspend fun performParse(input: String, useCookie: Boolean = false): Par
         if (ServerConfigStore.isPlaceholder(cfg.apiBase)) {
             localParseEngine.parse(input)
         } else {
-            ServerApiClient.parse(
+            val serverResult = ServerApiClient.parse(
                 input = input,
                 useCookie = useCookie,
                 original = original,
                 highest = highest,
                 batchId = batchId
             )
+            // 内置服务器分享页通道对图集（/note/）无数据，失败时回退本地 detail API
+            if (
+                serverResult is ParseResult.Error &&
+                batchId == null &&
+                ServerConfigStore.isInternal(cfg.apiBase) &&
+                looksLikeGalleryInput(input)
+            ) {
+                localParseEngine.parse(input)
+            } else {
+                serverResult
+            }
         }
+    }
+
+    /** 判断输入是否可能为图集图文（/note/ 路径或短链），用于内置服务器失败时的本地回退 */
+    private fun looksLikeGalleryInput(input: String): Boolean {
+        val normalized = input.lowercase()
+        return normalized.contains("/note/") ||
+            normalized.contains("share/note") ||
+            normalized.matches(Regex(".*v\\.douyin\\.com/.*"))
+    }
+
+    /** 同步检测：输入已含显式作者主页路径（/share/user/ /user/）时返回 (原文, 主页链接)，否则 null */
+    private fun detectExplicitHomepageLink(input: String): Pair<String, String>? {
+        val trimmed = input.trim()
+        if (!trimmed.contains("douyin", ignoreCase = true)) return null
+        val url = Regex("https?://[^\\s\\u4e00-\\u9fa5]+").find(trimmed)?.value
+            ?: trimmed
+        if (
+            url.contains("/share/user/", ignoreCase = true) ||
+            url.contains("/user/", ignoreCase = true)
+        ) {
+            return Pair(trimmed, url)
+        }
+        return null
+    }
+
+    /** 后台检测：短链跟随重定向后若是作者主页，返回 (原文, 主页链接)，否则 null */
+    private suspend fun detectHomepageViaRedirect(input: String): Pair<String, String>? = withContext(Dispatchers.IO) {
+        val trimmed = input.trim()
+        val url = Regex("https?://[^\\s\\u4e00-\\u9fa5]+").find(trimmed)?.value
+            ?: if (trimmed.matches(Regex("https?://\\S+"))) trimmed else return@withContext null
+        if (!url.matches(Regex("https?://v\\.douyin\\.com/[\\w/=]+"))) {
+            return@withContext null
+        }
+        val finalUrl = runCatching {
+            val request = okhttp3.Request.Builder()
+                .url(url)
+                .header("User-Agent", mobileUserAgent)
+                .header("Referer", "https://www.douyin.com/")
+                .build()
+            client.newCall(request).execute().use { response ->
+                response.request.url.toString()
+            }
+        }.getOrNull() ?: return@withContext null
+        if (
+            finalUrl.contains("/share/user/", ignoreCase = true) ||
+            finalUrl.contains("/user/", ignoreCase = true)
+        ) {
+            return@withContext Pair(trimmed, finalUrl)
+        }
+        null
     }
 
     /**

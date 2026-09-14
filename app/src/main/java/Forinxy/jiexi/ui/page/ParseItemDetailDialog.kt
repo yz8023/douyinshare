@@ -212,6 +212,30 @@ internal fun ParseItemDetailDialog(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
+                if (displayItem.type == "video") {
+                    val qualityList = displayItem.qualityList.orEmpty()
+                    if (qualityList.isNotEmpty()) {
+                        androidx.compose.foundation.layout.Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "选择画质直接下载",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            qualityList.forEach { option ->
+                                QualityOptionRow(
+                                    option = option,
+                                    enabled = !saveState.isSaving && !isLoadingUrl,
+                                    onClick = {
+                                        viewModel.saveVideoWithQuality(context, displayItem, option)
+                                        onDismiss()
+                                    }
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+                }
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -309,6 +333,63 @@ internal fun ParseItemDetailDialog(
             item = displayItem,
             onDismiss = { showImageSaveDialog = false },
             context = context
+        )
+    }
+}
+
+@Composable
+private fun QualityOptionRow(
+    option: Forinxy.jiexi.data.VideoQualityOption,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    val label = if (option.isOriginal && !option.label.contains("原画")) {
+        "${option.label}（原画）"
+    } else {
+        option.label
+    }
+    val sizeText = option.sizeBytes?.let {
+        if (it > 0) {
+            val units = arrayOf("B", "KB", "MB", "GB")
+            var value = it.toDouble()
+            var unitIndex = 0
+            while (value >= 1024 && unitIndex < units.lastIndex) {
+                value /= 1024
+                unitIndex++
+            }
+            if (unitIndex == 0) {
+                "${it}B"
+            } else {
+                String.format(Locale.US, "%.1f%s", value, units[unitIndex])
+            }
+        } else {
+            "大小未知"
+        }
+    } ?: "大小未知"
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(
+                enabled = enabled,
+                onClick = onClick
+            )
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            text = sizeText,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }

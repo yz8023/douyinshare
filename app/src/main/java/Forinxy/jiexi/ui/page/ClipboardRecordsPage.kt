@@ -110,7 +110,8 @@ private fun matchesQuery(record: ClipboardRecordEntity, query: String): Boolean 
 @Composable
 fun ClipboardRecordsPage(
     viewModel: ClipboardRecordsViewModel = viewModel(),
-    parserViewModel: ParserViewModel = viewModel()
+    parserViewModel: ParserViewModel = viewModel(),
+    onOpenInHome: (ClipboardRecordEntity) -> Unit = {}
 ) {
     val records by viewModel.records.collectAsState()
     val parsingIds = viewModel.parsingIds
@@ -198,7 +199,7 @@ fun ClipboardRecordsPage(
                             record = record,
                             parsing = record.id in parsingIds.value,
                             onClick = {
-                                showDetailDialog = record
+                                onOpenInHome(record)
                             },
                             onReParse = { viewModel.parseAgain(record) },
                             onCopy = {
