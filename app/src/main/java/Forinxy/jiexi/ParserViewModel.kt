@@ -131,6 +131,10 @@ class ParserViewModel(application: Application) : AndroidViewModel(application) 
     private val _qualitySelectionRequest = mutableStateOf<QualitySelectionRequest?>(null)
     val qualitySelectionRequest: State<QualitySelectionRequest?> = _qualitySelectionRequest
 
+    /** 解析成功后直接在结果区展示的画质选项（含探测到的大小），供点击直接下载 */
+    private val _videoQualityOptions = mutableStateOf<List<VideoQualityOption>?>(null)
+    val videoQualityOptions: State<List<VideoQualityOption>?> = _videoQualityOptions
+
     fun respondQualitySelection(option: VideoQualityOption?) {
         _qualitySelectionRequest.value?.continuation?.complete(option)
         _qualitySelectionRequest.value = null
@@ -193,6 +197,7 @@ class ParserViewModel(application: Application) : AndroidViewModel(application) 
     private val localParseEngine by lazy { LocalParseEngine(application) }
     private var parseJob: Job? = null
     private var batchParseJob: Job? = null
+    private var qualityResolveJob: Job? = null
     private var parseRequestToken = 0L
     private var batchParseRequestToken = 0L
     @Volatile
@@ -281,6 +286,7 @@ class ParserViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         _parseResult.value = ParseResult.Loading
+        _videoQualityOptions.value = null
 
         val requestToken = ++parseRequestToken
         parseJob = viewModelScope.launch {
@@ -296,6 +302,7 @@ class ParserViewModel(application: Application) : AndroidViewModel(application) 
                         lastPlayUrlUpdateTime = System.currentTimeMillis() / 1000
                     )
                     saveParseResult(result)
+                    resolveVideoQualityOptions(result)
                 }
 
                 if (requestToken == parseRequestToken) {
@@ -972,6 +979,44 @@ private suspend fun performParse(input: String, useCookie: Boolean = false): Par
         }
     }
 
+    /**
+     * 解析成功后异步探测各画质大小，发布到 [videoQualityOptions]，
+     * 供结果区「画质＋大小」按钮组直接点击下载。非视频 / 无画质列表时置空。
+     */
+    private fun resolveVideoQualityOptions(result: ParseResult.Success) {
+        qualityResolveJob?.cancel()
+        if (result.type != "video" || result.qualityList.isNullOrEmpty()) {
+            _videoQualityOptions.value = null
+            return
+        }
+        qualityResolveJob = viewModelScope.launch(Dispatchers.IO) {
+            val options = resolveQualityOptionsWithProbedSizes(result)
+            withContext(Dispatchers.Main.immediate) {
+                if (_parseResult.value is ParseResult.Success) {
+                    _videoQualityOptions.value = options
+                }
+            }
+        }
+    }
+
+    /** 直接按指定画质下载视频：结果区画质按钮点击入口，跳过弹窗直接保存 */
+    fun saveVideoWithQuality(
+        context: Context,
+        result: ParseResult.Success,
+        option: VideoQualityOption
+    ) {
+        if (_saveState.value.isSaving || result.type != "video") {
+            return
+        }
+        if (!SecurityGuard.enforce(context.applicationContext)) {
+            Toast.makeText(context, SERVICE_UNAVAILABLE_MESSAGE, Toast.LENGTH_SHORT).show()
+            return
+        }
+        viewModelScope.launch {
+            saveVideoCore(context = context, result = result, requestedQuality = option)
+        }
+    }
+
 
     private suspend fun resolveVideoSaveRequest(
         item: ParseResult.Success,
@@ -1372,6 +1417,103 @@ private suspend fun performParse(input: String, useCookie: Boolean = false): Par
         }
     }
 
+    /**
+     * 单条视频保存核心逻辑：准备地址 → 大小确认 → 带进度落盘。
+     * 被 [saveMedia]（先弹画质选择框）与 [saveVideoWithQuality]（结果区点画质按钮，直接按选定画质保存）共用。
+     */
+    private suspend fun saveVideoCore(
+        context: Context,
+        result: ParseResult.Success,
+        requestedQuality: VideoQualityOption?
+    ) {
+        // 鏈€楂樼敾璐?鍘熺敾璐ㄥ紑鍚椂锛屼繚瀛樺墠闇€瑕佹湇鍔″櫒閲嶆柊瑙ｆ瀽锛坈ookie 妯″紡锛夛紝
+        // 鑰楁椂杈冮暱锛屾樉绀?鍑嗗瑙嗛"鎻愮ず锛涘叧闂椂鐢ㄨВ鏋愰樁娈靛湴鍧€锛岀洿鎺ヤ繚瀛?
+        val needServerReParse = requestedQuality == null && (
+            DouyinAuthStore.isHighestQualityVideoSaveEnabled(
+                context.applicationContext
+            ) || DouyinAuthStore.isOriginalVideoSaveEnabled(context.applicationContext)
+            )
+        val shouldShowPrepareState = needServerReParse
+        var prepareStateShown = false
+        val prepareStateJob = if (shouldShowPrepareState) {
+            viewModelScope.launch {
+                delay(400L)
+                prepareStateShown = true
+                _saveState.value = SaveState(
+                    isSaving = true,
+                    total = 1,
+                    current = 0,
+                    progress = 0f,
+                    label = SAVE_VIDEO_PREPARE_LABEL,
+                    indeterminate = true
+                )
+            }
+        } else {
+            null
+        }
+
+        val downloadRequest = runCatching {
+            resolveVideoSaveRequest(result, requestedQuality)
+        }.onFailure { throwable ->
+            Log.w("ParserViewModel", "Failed to prepare video save request", throwable)
+        }.getOrNull()
+        prepareStateJob?.cancel()
+        if (downloadRequest == null) {
+            if (prepareStateShown) {
+                _saveState.value = SaveState()
+            }
+            return
+        }
+
+        // 鍗曟潯瑙嗛淇濆瓨鍓嶏細鎺㈡祴澶у皬锛岃秴杩囬槇鍊兼椂璇㈤棶鏄惁缁х画
+        val (proceed, sizeProbe) = confirmVideoSaveSizeIfNeeded(
+            context = context,
+            request = downloadRequest
+        )
+        if (!proceed) {
+            _saveState.value = SaveState()
+            return
+        }
+
+        val videoFileName = buildVideoFileName(result.title, result.author)
+
+        _saveState.value = SaveState(
+            isSaving = true,
+            total = 1,
+            current = 0,
+            progress = 0f,
+            label = SAVE_VIDEO_LABEL,
+            indeterminate = false
+        )
+
+        val success = saveFile(
+            context = context,
+            client = downloadClient,
+            url = downloadRequest.url,
+            headers = downloadRequest.headers,
+            mimeType = "video/mp4",
+            timestamp = result.timestamp,
+            fileName = videoFileName,
+            probe = sizeProbe
+        ) { bytes, total ->
+            if (total > 0) {
+                withContext(Dispatchers.Main.immediate) {
+                    _saveState.value = _saveState.value.copy(
+                        current = 1,
+                        progress = bytes.toFloat() / total,
+                        downloadedBytes = bytes,
+                        totalBytes = total
+                    )
+                }
+            }
+        }
+
+        _saveState.value = SaveState()
+        if (success) {
+            Toast.makeText(context, SAVE_VIDEO_SUCCESS, Toast.LENGTH_SHORT).show()
+        }
+    }
+
     fun saveMedia(
         context: Context,
         result: ParseResult.Success,
@@ -1398,92 +1540,11 @@ private suspend fun performParse(input: String, useCookie: Boolean = false): Par
                         is QualitySelectionOutcome.NoOptions -> Unit
                     }
                 }
-                // 鏈€楂樼敾璐?鍘熺敾璐ㄥ紑鍚椂锛屼繚瀛樺墠闇€瑕佹湇鍔″櫒閲嶆柊瑙ｆ瀽锛坈ookie 妯″紡锛夛紝
-                // 鑰楁椂杈冮暱锛屾樉绀?鍑嗗瑙嗛"鎻愮ず锛涘叧闂椂鐢ㄨВ鏋愰樁娈靛湴鍧€锛岀洿鎺ヤ繚瀛?
-                val needServerReParse = requestedQuality == null && (
-                    DouyinAuthStore.isHighestQualityVideoSaveEnabled(
-                        context.applicationContext
-                    ) || DouyinAuthStore.isOriginalVideoSaveEnabled(context.applicationContext)
-                    )
-                val shouldShowPrepareState = needServerReParse
-                var prepareStateShown = false
-                val prepareStateJob = if (shouldShowPrepareState) {
-                    launch {
-                        delay(400L)
-                        prepareStateShown = true
-                        _saveState.value = SaveState(
-                            isSaving = true,
-                            total = 1,
-                            current = 0,
-                            progress = 0f,
-                            label = SAVE_VIDEO_PREPARE_LABEL,
-                            indeterminate = true
-                        )
-                    }
-                } else {
-                    null
-                }
-
-                val downloadRequest = runCatching {
-                    resolveVideoSaveRequest(result, requestedQuality)
-                }.onFailure { throwable ->
-                    Log.w("ParserViewModel", "Failed to prepare video save request", throwable)
-                }.getOrNull()
-                prepareStateJob?.cancel()
-                if (downloadRequest == null) {
-                    if (prepareStateShown) {
-                        _saveState.value = SaveState()
-                    }
-                    return@launch
-                }
-
-                // 鍗曟潯瑙嗛淇濆瓨鍓嶏細鎺㈡祴澶у皬锛岃秴杩囬槇鍊兼椂璇㈤棶鏄惁缁х画
-                val (proceed, sizeProbe) = confirmVideoSaveSizeIfNeeded(
+                saveVideoCore(
                     context = context,
-                    request = downloadRequest
+                    result = result,
+                    requestedQuality = requestedQuality
                 )
-                if (!proceed) {
-                    _saveState.value = SaveState()
-                    return@launch
-                }
-
-                val videoFileName = buildVideoFileName(result.title, result.author)
-
-                _saveState.value = SaveState(
-                    isSaving = true,
-                    total = 1,
-                    current = 0,
-                    progress = 0f,
-                    label = SAVE_VIDEO_LABEL,
-                    indeterminate = false
-                )
-
-                val success = saveFile(
-                    context = context,
-                    client = downloadClient,
-                    url = downloadRequest.url,
-                    headers = downloadRequest.headers,
-                    mimeType = "video/mp4",
-                    timestamp = result.timestamp,
-                    fileName = videoFileName,
-                    probe = sizeProbe
-                ) { bytes, total ->
-                    if (total > 0) {
-                        withContext(Dispatchers.Main.immediate) {
-                            _saveState.value = _saveState.value.copy(
-                                current = 1,
-                                progress = bytes.toFloat() / total,
-                                downloadedBytes = bytes,
-                                totalBytes = total
-                            )
-                        }
-                    }
-                }
-
-                _saveState.value = SaveState()
-                if (success) {
-                    Toast.makeText(context, SAVE_VIDEO_SUCCESS, Toast.LENGTH_SHORT).show()
-                }
                 return@launch
             }
 

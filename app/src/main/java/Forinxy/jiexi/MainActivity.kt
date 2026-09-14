@@ -524,6 +524,60 @@ private fun formatFileSize(bytes: Long): String {
 }
 
 @Composable
+private fun QualityDownloadRow(
+    option: Forinxy.jiexi.data.VideoQualityOption,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    val label = if (option.isOriginal && !option.label.contains("原画")) {
+        "${option.label}（原画）"
+    } else {
+        option.label
+    }
+    MiuixSurface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(
+                enabled = enabled,
+                onClick = onClick
+            ),
+        color = MaterialTheme.colorScheme.surfaceContainerLow
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (option.sizeBytes != null && option.sizeBytes > 0) {
+                    Text(
+                        text = formatFileSize(option.sizeBytes!!),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "下载",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun LiquidGlassNavigationBar(
     items: List<Screen>,
     currentRoute: String?,
@@ -585,6 +639,7 @@ fun ParserUI(viewModel: ParserViewModel) {
     var text by rememberSaveable { mutableStateOf("") }
     val parseResult by viewModel.parseResult
     val saveState by viewModel.saveState
+    val videoQualityOptions by viewModel.videoQualityOptions
     val context = LocalContext.current
     val isResumed by rememberIsResumed()
     val clipboardManager: ClipboardManager = LocalClipboardManager.current
@@ -768,6 +823,39 @@ fun ParserUI(viewModel: ParserViewModel) {
                                     enabled = !isBusy,
                                     modifier = Modifier.align(Alignment.TopEnd)
                                 )
+                            }
+                        }
+                    }
+
+                    if (result.type == "video") {
+                        val qualityOptions = videoQualityOptions
+                        if (!qualityOptions.isNullOrEmpty()) {
+                            item(span = { GridItemSpan(3) }) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = "选择画质直接下载",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    qualityOptions.forEach { option ->
+                                        QualityDownloadRow(
+                                            option = option,
+                                            enabled = !isBusy,
+                                            onClick = {
+                                                viewModel.saveVideoWithQuality(
+                                                    context,
+                                                    result,
+                                                    option
+                                                )
+                                            }
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
