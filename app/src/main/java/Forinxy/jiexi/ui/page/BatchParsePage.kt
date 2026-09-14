@@ -52,12 +52,14 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedAssistChip
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Checkbox
@@ -594,6 +596,7 @@ fun BatchResultContent(
     val saveState by viewModel.saveState
     val selection = remember { mutableStateMapOf<String, Boolean>() }
     var visibleWorks by remember { mutableStateOf(works) }
+    var workFilter by remember { mutableStateOf(BatchWorkFilter.ALL) }
     var previewItem by remember { mutableStateOf<ParseResult.Success?>(null) }
     var gridColumns by remember { mutableStateOf(BatchDisplayPreferences.getBatchGridColumns(context)) }
     var selectionMode by remember { mutableStateOf(false) }
@@ -608,6 +611,8 @@ fun BatchResultContent(
         }
     }
 
+    val filteredWorks = visibleWorks.filter { workFilter.matches(it) }
+
     LaunchedEffect(visibleWorks) {
         val validKeys = visibleWorks.map(::workKey).toSet()
         selection.keys.toList()
@@ -618,7 +623,7 @@ fun BatchResultContent(
         }
     }
 
-    val selectedWorks = visibleWorks.filter { selection[workKey(it)] == true }
+    val selectedWorks = filteredWorks.filter { selection[workKey(it)] == true }
     val selectedCount = selectedWorks.size
     val selectedMediaCount = selectedWorks.sumOf(::mediaCount)
 
@@ -633,13 +638,20 @@ fun BatchResultContent(
             BatchSummaryCard(summary = summary)
         }
         item(span = { GridItemSpan(maxLineSpan) }) {
+            BatchWorkFilterBar(
+                current = workFilter,
+                summary = summary,
+                onSelect = { workFilter = it }
+            )
+        }
+        item(span = { GridItemSpan(maxLineSpan) }) {
             BatchActionBar(
                 summary = summary,
                 selectedCount = selectedCount,
                 selectedMediaCount = selectedMediaCount,
                 saveEnabled = !saveState.isSaving,
                 selectionMode = selectionMode,
-                onSaveAll = { viewModel.saveBatchMedia(context, summary, visibleWorks) },
+                onSaveAll = { viewModel.saveBatchMedia(context, summary, filteredWorks) },
                 onSaveSelected = {
                     if (selectedWorks.isEmpty()) {
                         Toast.makeText(context, "\u8bf7\u5148\u9009\u62e9\u4f5c\u54c1", Toast.LENGTH_SHORT).show()
@@ -649,8 +661,8 @@ fun BatchResultContent(
                 },
                 onSelectAll = {
                     selectionMode = true
-                    val shouldSelectAll = selectedCount < visibleWorks.size
-                    visibleWorks.forEach { selection[workKey(it)] = shouldSelectAll }
+                    val shouldSelectAll = selectedCount < filteredWorks.size
+                    filteredWorks.forEach { selection[workKey(it)] = shouldSelectAll }
                 },
                 onCancelSelection = {
                     selectionMode = false
@@ -660,7 +672,7 @@ fun BatchResultContent(
                 onDelete = onDelete
             )
         }
-        items(visibleWorks, key = { workKey(it) }) { item ->
+        items(filteredWorks, key = { workKey(it) }) { item ->
             BatchWorkCard(
                 item = item,
                 gridColumns = gridColumns,
@@ -673,6 +685,13 @@ fun BatchResultContent(
                 onLongPress = {
                     selectionMode = true
                     selection[workKey(item)] = true
+                },
+                onDownloadAll = if (item.type == "image") {
+                    {
+                        viewModel.saveMedia(context, item, item.galleryItems.orEmpty())
+                    }
+                } else {
+                    null
                 }
             )
         }
@@ -829,6 +848,59 @@ private fun BatchErrorCard(message: String) {
             text = message,
             color = MaterialTheme.colorScheme.error
         )
+    }
+}
+
+private enum class BatchWorkFilter(val label: String) {
+    ALL("全部"),
+    VIDEO("\u89c6\u9891"),
+    IMAGE("\u56fe\u96c6"),
+    LIVE("\u5b9e\u51b5");
+
+    fun matches(item: ParseResult.Success): Boolean {
+        return when (this) {
+            ALL -> true
+            VIDEO -> item.type == "video"
+            IMAGE -> item.type == "image"
+            LIVE -> item.type == "image" && item.livePhotoCount > 0
+        }
+    }
+}
+
+@Composable
+private fun BatchWorkFilterBar(
+    current: BatchWorkFilter,
+    summary: BatchAuthorParseSummary,
+    onSelect: (BatchWorkFilter) -> Unit
+) {
+    val counts = remember(summary) {
+        mapOf(
+            BatchWorkFilter.ALL to summary.parsedCount,
+            BatchWorkFilter.VIDEO to summary.videoCount,
+            BatchWorkFilter.IMAGE to summary.imageCount
+        )
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        BatchWorkFilter.entries.forEach { filter ->
+            FilterChip(
+                selected = current == filter,
+                onClick = { onSelect(filter) },
+                label = {
+                    Text(
+                        text = if (filter == BatchWorkFilter.LIVE) {
+                            filter.label
+                        } else {
+                            "${filter.label} ${counts[filter] ?: 0}"
+                        }
+                    )
+                }
+            )
+        }
     }
 }
 
@@ -1005,7 +1077,8 @@ private fun BatchWorkCard(
     selected: Boolean,
     onSelectedChange: (Boolean) -> Unit,
     onPreview: () -> Unit,
-    onLongPress: () -> Unit
+    onLongPress: () -> Unit,
+    onDownloadAll: (() -> Unit)? = null
 ) {
     val cardShape = RoundedCornerShape(if (gridColumns >= 5) 10.dp else 14.dp)
     val labelHorizontalPadding = if (gridColumns >= 5) 6.dp else 10.dp
@@ -1094,6 +1167,23 @@ private fun BatchWorkCard(
                         .padding(if (gridColumns >= 5) 2.dp else 6.dp)
                         .size(checkboxSize)
                 )
+            } else if (item.type == "image" && onDownloadAll != null) {
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(if (gridColumns >= 5) 5.dp else 8.dp)
+                        .clickable(enabled = true) { onDownloadAll() },
+                    shape = RoundedCornerShape(999.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.92f)
+                ) {
+                    Text(
+                        text = if (item.livePhotoCount > 0) "\u6574\u672c\u4e0b\u8f7d(\u542b\u5b9e\u51b5)" else "\u6574\u672c\u4e0b\u8f7d",
+                        modifier = Modifier.padding(horizontal = labelHorizontalPadding + 4.dp, vertical = labelVerticalPadding),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                }
             }
         }
     }

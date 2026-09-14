@@ -112,6 +112,8 @@ class ParserViewModel(application: Application) : AndroidViewModel(application) 
         val mimeType: String,
         val timestamp: Long,
         val index: Int = 0,
+        val subPathOverride: String? = null,
+        val extensionOverride: String? = null,
         val resolveRequest: suspend () -> DouyinDownloadRequest?
     )
 
@@ -1669,7 +1671,9 @@ private suspend fun performParse(input: String, useCookie: Boolean = false): Par
                                     mimeType = task.mimeType,
                                     timestamp = task.timestamp,
                                     index = task.index,
-                                    fileName = task.fileName
+                                    fileName = task.fileName,
+                                    subPathOverride = task.subPathOverride,
+                                    extensionOverride = task.extensionOverride
                                 ) { bytes, total ->
                                     if (total > 0) {
                                         progressMap[task.progressKey] =
@@ -1744,23 +1748,47 @@ private suspend fun performParse(input: String, useCookie: Boolean = false): Par
 
         val tasks = mutableListOf<MediaSaveTask>()
 
+        // 实况配对：图片与配套动态视频用相同基名（xxx.01.jpg + xxx.01.mov），
+        // 并保存到同一目录（dyparse/image），供支持 Live Photo 的相册识别。
+        val livePairByIndex = livePhotoItems.associateBy { it.index }
+
         imageItems.forEachIndexed { saveIndex, media ->
             val imageUrl = media.imageUrl ?: return@forEachIndexed
+            val imageFileName = buildImageFileName(baseName, saveIndex, imageItems.size)
             tasks += MediaSaveTask(
                 progressKey = "image_${result.videoId}_${media.index}_${result.parseTimestamp}",
-                fileName = buildImageFileName(baseName, saveIndex, imageItems.size),
+                fileName = imageFileName,
                 mimeType = "image/jpeg",
                 timestamp = result.timestamp,
                 index = media.index,
                 resolveRequest = { buildDirectMediaDownloadRequest(imageUrl) }
             )
+
+            // 该图片是实况：同一个任务序列里把配套视频也按相同基名保存为 .mov
+            val livePhotoUrl = livePairByIndex[media.index]?.livePhotoRawUrl
+            if (!livePhotoUrl.isNullOrBlank()) {
+                tasks += MediaSaveTask(
+                    progressKey = "live_${result.videoId}_${media.index}_${result.parseTimestamp}",
+                    fileName = imageFileName,
+                    mimeType = "video/quicktime",
+                    timestamp = result.timestamp,
+                    index = media.index,
+                    subPathOverride = "dyparse/image",
+                    extensionOverride = "mov",
+                    resolveRequest = { buildDirectMediaDownloadRequest(livePhotoUrl) }
+                )
+                return@forEachIndexed
+            }
         }
 
-        livePhotoItems.forEachIndexed { saveIndex, media ->
+        // 仅有实况视频而无静态图的媒体单独保存（命名方式不变）
+        val savedLiveIndexes = selectedGalleryMedia
+            .filter { it.imageUrl.isNullOrBlank() && it.hasLivePhoto }
+        savedLiveIndexes.forEachIndexed { saveIndex, media ->
             val livePhotoUrl = media.livePhotoRawUrl ?: return@forEachIndexed
             tasks += MediaSaveTask(
-                progressKey = "live_${result.videoId}_${media.index}_${result.parseTimestamp}",
-                fileName = buildLivePhotoFileName(baseName, saveIndex, livePhotoItems.size),
+                progressKey = "live_only_${result.videoId}_${media.index}_${result.parseTimestamp}",
+                fileName = buildLivePhotoFileName(baseName, saveIndex, savedLiveIndexes.size),
                 mimeType = "video/mp4",
                 timestamp = result.timestamp,
                 index = media.index,
@@ -1842,7 +1870,9 @@ private suspend fun performParse(input: String, useCookie: Boolean = false): Par
                                     mimeType = task.mimeType,
                                     timestamp = task.timestamp,
                                     index = task.index,
-                                    fileName = task.fileName
+                                    fileName = task.fileName,
+                                    subPathOverride = task.subPathOverride,
+                                    extensionOverride = task.extensionOverride
                                 ) { bytes, total ->
                                     if (total > 0) {
                                         progressMap[task.progressKey] =

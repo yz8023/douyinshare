@@ -7,6 +7,7 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import Forinxy.jiexi.data.GalleryMedia
 import Forinxy.jiexi.data.ParseResult
+import Forinxy.jiexi.data.VideoQualityOption
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -155,8 +156,9 @@ internal class LocalParseEngine(
 
         val rawPlayUrl = DouyinContentMapper.extractRawPlayUrl(item)
             ?: throw IOException("本地解析失败：未找到播放地址")
-        // 本地模式没有服务器 quality_list：把原始播放地址同时作为 preview / 下载地址，
-        // originalPlayUrl 复用同一地址，保存原画质/最高画质时无需再请求服务器。
+        // 本地模式：从 detail 数据的 download_addr/bit_rate 构建画质列表；
+        // 两者都缺失时兜底为单个默认画质，保证结果区"画质＋大小"按钮可见。
+        val qualityList = buildQualityList(item, rawPlayUrl)
         return ParseResult.Success(
             author = author,
             authorUid = authorUid,
@@ -166,6 +168,7 @@ internal class LocalParseEngine(
             playUrl = rawPlayUrl,
             rawPlayUrl = rawPlayUrl,
             originalPlayUrl = rawPlayUrl,
+            qualityList = qualityList,
             images = null,
             galleryMedia = null,
             timestamp = timestamp,
@@ -174,5 +177,109 @@ internal class LocalParseEngine(
             inputUrl = inputUrl,
             source = "local"
         )
+    }
+
+    /** 从 aweme_detail 的 video 字段构建画质选项（原画质优先，其次 bit_rate 各档位，最后兜底默认画质） */
+    private fun buildQualityList(
+        item: Map<String, Any>,
+        fallbackRawPlayUrl: String
+    ): List<VideoQualityOption> {
+        val video = item.dig<Map<String, Any>>("video")
+        val options = mutableListOf<VideoQualityOption>()
+
+        fun firstUrl(addr: Map<String, Any>?): String? = addr?.dig<String>("url_list", 0)
+
+        val originalUrl = firstUrl(video?.dig<Map<String, Any>>("download_addr"))
+        if (!originalUrl.isNullOrBlank()) {
+            options += VideoQualityOption(
+                label = "原画质",
+                ratio = "default",
+                url = originalUrl,
+                sizeBytes = video?.dig<Number>("download_addr", "data_size")?.toLong()?.takeIf { it > 0 },
+                isOriginal = true
+            )
+        }
+
+        val seenRatios = linkedSetOf<String>()
+        video?.dig<List<*>>("bit_rate")?.forEach { raw ->
+            val entry = raw as? Map<String, Any> ?: return@forEach
+            val url = firstUrl(entry.dig<Map<String, Any>>("download_addr"))
+                ?: firstUrl(entry.dig<Map<String, Any>>("play_addr"))
+            if (url.isNullOrBlank()) return@forEach
+            val height = entry.dig<Number>("play_addr", "height")?.toInt()
+                ?: entry.dig<Number>("height")?.toInt() ?: 0
+            val ratio = if (height > 0) "${height}p" else "default"
+            if (ratio == "default" && options.any { it.isOriginal }) return@forEach
+            if (!seenRatios.add(ratio)) return@forEach
+            options += VideoQualityOption(
+                label = ratio,
+                ratio = ratio,
+                url = url,
+                sizeBytes = entry.dig<Number>("download_addr", "data_size")?.toLong()?.takeIf { it > 0 },
+                bitRate = entry.dig<Number>("bit_rate")?.toLong() ?: 0L
+            )
+        }
+
+        if (options.isEmpty()) {
+            // 分享页/详情无 download_addr/bit_rate 时，用 play_addr.uri 结合
+            // ratio 枚举多档（原画质 + 常见分辨率分组），避免只剩单个默认画质。
+            val playUri = video?.dig<String>("play_addr", "uri")
+                ?: video?.dig<List<*>>("bit_rate")?.firstOrNull()?.let {
+                    (it as? Map<*, *>)?.dig<String>("play_addr", "uri")
+                }
+            val playHeight = video?.dig<Number>("play_addr", "height")?.toInt()
+                ?: video?.dig<Number>("height")?.toInt()
+                ?: 0
+            if (playUri.isNullOrBlank() || playUri.contains("mp3", ignoreCase = true) || playUri.startsWith("http")) {
+                options += VideoQualityOption(
+                    label = "默认画质",
+                    ratio = "default",
+                    url = fallbackRawPlayUrl
+                )
+            } else {
+                fun fallbackUri(ratio: String): String {
+                    val encodedId = java.net.URLEncoder.encode(playUri, "UTF-8")
+                    val encodedRatio = java.net.URLEncoder.encode(ratio, "UTF-8")
+                    return "https://www.iesdouyin.com/aweme/v1/play/" +
+                        "?video_id=$encodedId&ratio=$encodedRatio&line=0" +
+                        "&is_play_url=1&watermark=0&source=PackSourceEnum_PUBLISH"
+                }
+
+                val seenUris = HashSet<String>()
+
+                // 原画质
+                val originalUrl = fallbackUri("default")
+                if (seenUris.add(originalUrl)) {
+                    options += VideoQualityOption(
+                        label = "原画质",
+                        ratio = "default",
+                        url = originalUrl,
+                        isOriginal = true
+                    )
+                }
+
+                // 常见分辨率分组（按实际高度截断，不高于原视频）
+                val common = listOf(1080 to "1080p", 720 to "720p", 540 to "540p", 360 to "360p", 240 to "240p")
+                for ((h, ratio) in common) {
+                    if (playHeight > 0 && h > playHeight) continue
+                    val url = fallbackUri(ratio)
+                    if (!seenUris.add(url)) continue
+                    options += VideoQualityOption(
+                        label = ratio,
+                        ratio = ratio,
+                        url = url
+                    )
+                }
+
+                if (options.isEmpty()) {
+                    options += VideoQualityOption(
+                        label = "默认画质",
+                        ratio = "default",
+                        url = fallbackRawPlayUrl
+                    )
+                }
+            }
+        }
+        return options.sortedByDescending { if (it.ratio == "default") -1 else it.ratio.toIntOrNull() ?: -1 }
     }
 }

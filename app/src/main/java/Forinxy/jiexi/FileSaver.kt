@@ -73,6 +73,8 @@ suspend fun saveFile(
     index: Int = 0,
     fileName: String? = null,
     probe: SaveSizeProbe? = null,
+    subPathOverride: String? = null,
+    extensionOverride: String? = null,
     onProgress: suspend (Long, Long) -> Unit = { _, _ -> }
 ): Boolean = withContext(Dispatchers.IO) {
     val uniqueSuffix = url.hashCode().toString().replace("-", "")
@@ -85,12 +87,14 @@ suspend fun saveFile(
 
     val customFileName = fileName?.takeIf { it.isNotBlank() }
     val finalFileName = when {
+        extensionOverride != null ->
+            ensureExtension(customFileName ?: defaultFileName, extensionOverride)
         isVideo -> ensureExtension(customFileName ?: defaultFileName, "mp4")
         customFileName != null -> ensureExtension(customFileName, "jpg")
         else -> defaultFileName
     }
 
-    val subPath = if (isVideo) "dyparse/video" else "dyparse/image"
+    val subPath = subPathOverride ?: if (isVideo) "dyparse/video" else "dyparse/image"
     var lastError: Exception? = null
 
     repeat(MAX_SAVE_ATTEMPTS) { attempt ->

@@ -776,12 +776,30 @@ class AuthorBatchManager(
         cursor: Long,
         count: Int
     ): String = withContext(Dispatchers.IO) {
-        val first = executeAuthorPageRequest(resolvedInput, cursor, count, AuthorSignatureMode.ABOGUS)
-        if (first.body.contains("\"aweme_list\"", ignoreCase = true) || resolvedInput.hasDirectPostApi()) {
-            return@withContext first.body
+        // 每次请求可能因缺少有效匿名会话 cookie 抛出 403（Uifid Not Found）。
+        // 把"预热 cookie 后再签名重试"的链路真正跑起来，而不是让第一次 403 直接中断。
+        var lastError: IOException? = null
+        suspend fun attempt(input: ResolvedAuthorInput, mode: AuthorSignatureMode): AuthorPageHttpResult? {
+            return try {
+                executeAuthorPageRequest(input, cursor, count, mode).also { lastError = null }
+            } catch (e: IOException) {
+                lastError = e
+                null
+            }
+        }
+        fun listBody(result: AuthorPageHttpResult?): String? =
+            result?.takeIf { it.body.contains("\"aweme_list\"", ignoreCase = true) }?.body
+
+        val first = attempt(resolvedInput, AuthorSignatureMode.ABOGUS)
+        listBody(first)?.let { return@withContext it }
+        if (resolvedInput.hasDirectPostApi()) {
+            return@withContext first?.body ?: throw IOException(
+                "\u4f5c\u8005\u4e3b\u9875\u63a5\u53e3\u8bf7\u6c42\u5931\u8d25",
+                lastError
+            )
         }
 
-        val refreshedMsToken = first.msToken
+        val refreshedMsToken = first?.msToken
         val retryInput = if (!refreshedMsToken.isNullOrBlank() && refreshedMsToken != resolvedInput.msToken) {
             resolvedInput.copy(msToken = refreshedMsToken)
         } else {
@@ -789,56 +807,40 @@ class AuthorBatchManager(
         }
 
         val second = if (retryInput !== resolvedInput) {
-            executeAuthorPageRequest(retryInput, cursor, count, AuthorSignatureMode.ABOGUS)
+            attempt(retryInput, AuthorSignatureMode.ABOGUS)
         } else {
             first
         }
-        if (second.body.contains("\"aweme_list\"", ignoreCase = true)) {
-            return@withContext second.body
-        }
+        listBody(second)?.let { return@withContext it }
 
-        val third = runCatching {
-            executeAuthorPageRequest(retryInput, cursor, count, AuthorSignatureMode.XBOGUS)
-        }.getOrElse { throwable ->
-            Log.w("AuthorBatchManager", "X-Bogus author post retry failed", throwable)
-            return@withContext second.body
-        }
-        if (third.body.contains("\"aweme_list\"", ignoreCase = true)) {
-            return@withContext third.body
-        }
+        val third = attempt(retryInput, AuthorSignatureMode.XBOGUS)
+        listBody(third)?.let { return@withContext it }
 
+        // 预热 WebView 匿名会话（ttwid/msToken）并持久化，再用真实 cookie 重试签名请求
         val warmedCookie = runCatching {
             webApiBridge.warmUpDouyinCookies()
         }.onFailure { throwable ->
             Log.w("AuthorBatchManager", "Douyin cookie warm-up failed", throwable)
         }.getOrNull().orEmpty()
-        if (warmedCookie.isBlank()) {
-            return@withContext third.body
+        if (warmedCookie.isNotBlank()) {
+            AnonymousSessionStore.saveCookie(application, warmedCookie)
         }
 
-        val cookieMsToken = extractCookieValue(warmedCookie, "msToken")
         val warmedInput = retryInput.copy(
-            msToken = cookieMsToken ?: retryInput.msToken,
+            msToken = extractCookieValue(warmedCookie, "msToken") ?: retryInput.msToken,
             directPostApiHeaders = retryInput.directPostApiHeaders + ("Cookie" to warmedCookie)
         )
-        val fourth = runCatching {
-            executeAuthorPageRequest(warmedInput, cursor, count, AuthorSignatureMode.ABOGUS)
-        }.getOrElse { throwable ->
-            Log.w("AuthorBatchManager", "Cookie warmed a_bogus author post retry failed", throwable)
-            third
-        }
-        if (fourth.body.contains("\"aweme_list\"", ignoreCase = true)) {
-            return@withContext fourth.body
-        }
+        val fourth = attempt(warmedInput, AuthorSignatureMode.ABOGUS)
+        listBody(fourth)?.let { return@withContext it }
 
-        val fifth = runCatching {
-            executeAuthorPageRequest(warmedInput, cursor, count, AuthorSignatureMode.XBOGUS)
-        }.getOrElse { throwable ->
-            Log.w("AuthorBatchManager", "Cookie warmed X-Bogus author post retry failed", throwable)
-            fourth
-        }
+        val fifth = attempt(warmedInput, AuthorSignatureMode.XBOGUS)
+        listBody(fifth)?.let { return@withContext it }
 
-        fifth.body
+        // 全部失败：优先抛出最后一个 HTTP 错误（如 403），否则返回最后一个响应体
+        lastError?.let { throw it }
+        listOfNotNull(fifth, fourth, third, second, first).lastOrNull()?.body
+            ?.let { return@withContext it }
+        throw IOException("\u4f5c\u8005\u4e3b\u9875\u63a5\u53e3\u8bf7\u6c42\u5931\u8d25", lastError)
     }
 
     private data class AuthorPageHttpResult(
@@ -1166,6 +1168,15 @@ class AuthorBatchManager(
     private suspend fun resolveAuthorInput(input: String): ResolvedAuthorInput = withContext(Dispatchers.IO) {
         val savedAuthCookie = DouyinAuthStore.getCookie(application)
         val savedMsToken = DouyinAuthStore.extractCookieValue(savedAuthCookie, "msToken")
+        // 未登录时回落到持久化匿名会话（ttwid/msToken）：抖音 aweme/post 接口缺少
+        // 有效匿名会话 cookie 时即使带 a_bogus 签名也会 403（Uifid Not Found）。
+        val anonymousCookie = if (savedAuthCookie.isNullOrBlank()) {
+            AnonymousSessionStore.getCookie(application)
+        } else {
+            null
+        }
+        val anonymousMsToken = anonymousCookie?.let { DouyinAuthStore.extractCookieValue(it, "msToken") }
+        val effectiveAuthCookie = savedAuthCookie ?: anonymousCookie
         val matchedUrl = extractFirstUrl(input) ?: run {
             throw IOException("\u8bf7\u8f93\u5165\u4f5c\u8005\u4e3b\u9875\u5206\u4eab\u94fe\u63a5")
         }
@@ -1185,8 +1196,8 @@ class AuthorBatchManager(
                 directPostApiUrl = capturedPostApiUrls.firstOrNull(),
                 directPostApiUrls = capturedPostApiUrls,
                 directPostApiHeaders = capturedHeaders,
-                msToken = extractMsTokenFromCapturedInput(input) ?: savedMsToken ?: resolveBootstrapMsToken(secUserId),
-                authCookie = savedAuthCookie
+                msToken = extractMsTokenFromCapturedInput(input) ?: savedMsToken ?: anonymousMsToken ?: resolveBootstrapMsToken(secUserId),
+                authCookie = effectiveAuthCookie
             )
         }
 
@@ -1201,8 +1212,8 @@ class AuthorBatchManager(
                     matchedUrl = matchedUrl,
                     finalUrl = matchedUrl,
                     authorUrl = authorUrl,
-                    msToken = savedMsToken ?: resolveBootstrapMsToken(secUserId),
-                    authCookie = savedAuthCookie
+                    msToken = savedMsToken ?: anonymousMsToken ?: resolveBootstrapMsToken(secUserId),
+                    authCookie = effectiveAuthCookie
                 )
             )
         }
@@ -1232,8 +1243,8 @@ class AuthorBatchManager(
                     matchedUrl = matchedUrl,
                     finalUrl = finalUrl,
                     authorUrl = normalizeAuthorUrl(finalUrl, secUserId),
-                    msToken = extractMsToken(response) ?: savedMsToken ?: resolveBootstrapMsToken(secUserId),
-                    authCookie = savedAuthCookie
+                    msToken = extractMsToken(response) ?: savedMsToken ?: anonymousMsToken ?: resolveBootstrapMsToken(secUserId),
+                    authCookie = effectiveAuthCookie
                 )
             )
         }

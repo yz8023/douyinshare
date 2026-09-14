@@ -545,7 +545,7 @@ internal class BuiltInParser(context: Context) {
         }
 
         // 2) bit_rate 各档位：按比例去重（同一 ratio 只保留 data_size 最大的一档）
-        val bitRate = video.asArray("bit_rate") ?: return list
+        val bitRate = video.asArray("bit_rate") ?: return appendFallbackQuality(list, video)
         val byRatio = LinkedHashMap<String, JsonObject>()
         for (el in bitRate) {
             if (!el.isJsonObject) continue
@@ -623,7 +623,91 @@ internal class BuiltInParser(context: Context) {
             list.add(quality)
         }
 
+        return appendFallbackQuality(list, video)
+    }
+
+    /**
+     * 分享页/详情接口不再返回 download_addr/bit_rate 时（抖音已逐步下架 web 端
+     * 下载地址），兜底用 play_addr 的 video_id 结合 ratio 枚举常见画质分组，
+     * 让结果区"画质＋大小"选择不再只有单个默认档：
+     *  - 原画质（ratio=default）
+     *  - 最高画质（候选地址里分辨率最高的一档）
+     *  - 常见分辨率分组（1080p/720p/540p/360p，按 play_addr 高度就近归组）
+     */
+    private fun appendFallbackQuality(list: JsonArray, video: JsonObject): JsonArray {
+        if (list.size() > 0) return list
+        val playUri = video.asObject("play_addr")?.asString("uri")
+            ?: video.asArray("bit_rate")?.firstOrNullJsonObject()?.asObject("play_addr")?.asString("uri")
+        if (playUri.isNullOrBlank() || playUri.contains("mp3", ignoreCase = true)) {
+            return list
+        }
+
+        fun qualityEntry(label: String, ratio: String, uri: String, isOriginal: Boolean): JsonObject {
+            val entry = JsonObject()
+            entry.addProperty("label", label)
+            entry.addProperty("ratio", ratio)
+            entry.addProperty(
+                "url",
+                if (uri.startsWith("http")) uri else buildOriginalPlayEndpointUrl(uri, ratio)
+            )
+            entry.add("size_bytes", JsonNull.INSTANCE)
+            entry.addProperty("bit_rate", 0L)
+            entry.addProperty("is_original", isOriginal)
+            return entry
+        }
+
+        val seenUris = HashSet<String>()
+        // 1) 原画质
+        val original = qualityEntry("原画质", "default", playUri, true)
+        val originalUrl = original.asString("url")
+        if (originalUrl != null && seenUris.add(originalUrl)) list.add(original)
+
+        // 2) 最高画质：从候选列表挑分辨率最高的一档（覆盖 play_addr_h264/265 等情况）
+        val candidates = collectVideoCandidates(JsonObject().also { it.add("video", video) })
+        val bestCandidate = pickHighestCandidate(candidates)
+        if (bestCandidate != null) {
+            val bestHeight = bestCandidate.asLong("height")?.takeIf { it > 0 }
+            val bestRatioVal = bestHeight?.let { "${it}p" } ?: "default"
+            val bestLabel = bestHeight?.let { "${it}p" } ?: "最高画质"
+            val bestUrl = bestCandidate.asString("url")
+            if (!bestUrl.isNullOrBlank() && seenUris.add(bestUrl)) {
+                list.add(
+                    qualityEntry(
+                        if (bestHeight != null) "最高画质 $bestLabel" else "最高画质",
+                        bestRatioVal,
+                        bestUrl,
+                        false
+                    )
+                )
+            }
+        }
+
+        // 3) 按 play_addr 高度就近归入常见分组，枚举多档
+        val playHeight = video.asObject("play_addr")?.asLong("height")?.toInt()
+            ?: video.asLong("height")?.toInt()
+            ?: parseResolutionHeight(video)
+            ?: 0
+        val groups = if (playHeight > 0) {
+            fallbackRatioGroupsFor(playHeight)
+        } else {
+            listOf("1080p" to 1080, "720p" to 720, "540p" to 540, "360p" to 360)
+                .filter { (ratio, h) -> !seenUris.contains(buildOriginalPlayEndpointUrl(playUri, ratio)) }
+        }
+        for ((ratio, _) in groups) {
+            val url = buildOriginalPlayEndpointUrl(playUri, ratio)
+            if (!seenUris.add(url)) continue
+            list.add(qualityEntry(ratio, ratio, playUri, false))
+        }
+
         return list
+    }
+
+    /** 依据实际高度生成不高于它的常见画质分组（避免出现比原视频更高的假档位） */
+    private fun fallbackRatioGroupsFor(playHeight: Int): List<Pair<String, Int>> {
+        val common = listOf(1080 to "1080p", 720 to "720p", 540 to "540p", 360 to "360p", 240 to "240p")
+        return common
+            .filter { (h, _) -> h <= playHeight }
+            .map { (h, ratio) -> ratio to h }
     }
 
     private fun qualityLabelForEntry(entry: JsonObject?, height: Int): String {

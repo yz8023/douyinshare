@@ -4,6 +4,27 @@ import Forinxy.jiexi.data.GalleryMedia
 
 object DouyinGalleryMediaResolver {
     fun collectGalleryMedia(item: Map<String, Any>): List<GalleryMedia> {
+        // 优先处理顶层平铺结构：flat_images（图片 URL 列表）与 flat_live_photos
+        // （实况动态图地址列表）按下标一一对应。homepage 单条 detail API 返回
+        // 的图集也是这种结构，此前不识别导致首页图集实况标志缺失。
+        val flatImages = item["flat_images"].takeIf { it is List<*> }
+        if (flatImages != null) {
+            val livePhotos = item["flat_live_photos"].takeIf { it is List<*> } as? List<*> ?: emptyList<Any?>()
+            return (flatImages as List<*>).mapIndexedNotNull { index, element ->
+                val imageUrl = (element as? String)?.takeIf { it.isNotBlank() }
+                val livePhotoUrl = (livePhotos.getOrNull(index) as? String)?.takeIf { it.isNotBlank() }
+                if (imageUrl == null && livePhotoUrl == null) {
+                    null
+                } else {
+                    GalleryMedia(
+                        index = index,
+                        imageUrl = imageUrl,
+                        livePhotoRawUrl = livePhotoUrl
+                    )
+                }
+            }
+        }
+
         val sourceLists = collectGallerySourceLists(item)
         val maxSize = sourceLists.maxOfOrNull { it.size } ?: 0
         return (0 until maxSize).mapNotNull { index ->
