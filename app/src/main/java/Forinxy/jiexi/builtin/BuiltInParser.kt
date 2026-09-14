@@ -158,9 +158,12 @@ internal class BuiltInParser(context: Context) {
 
     // ========== 作品 ID 解析 ==========
 
-    private val videoIdPattern = Pattern.compile("/video/(\\d{15,21})")
+    // 同时支持视频（/video/）与图集图文（/note/）路径
+    private val videoIdPattern = Pattern.compile("/(?:video|note)/(\\d{15,21})")
     private val plainIdPattern = Pattern.compile("^(\\d{15,21})$")
     private val urlInTextPattern = Pattern.compile("https?://[^\\s\\u4e00-\\u9fa5]+")
+    // 重定向 URL 兜底：直接取第一个 15-21 位纯数字串
+    private val bareIdPattern = Pattern.compile("(\\d{15,21})")
 
     private fun resolveVideoId(input: String): String? {
         val trimmed = input.trim()
@@ -182,9 +185,9 @@ internal class BuiltInParser(context: Context) {
         return null
     }
 
-    /** 短链跟随重定向拿最终作品页，再提取 ID */
+    /** 短链跟随重定向拿最终作品页，再提取 ID（兼容 /video/ 与 /note/ 图文） */
     private fun resolveViaRedirect(url: String): String? {
-        return try {
+        val finalUrl = try {
             val request = Request.Builder()
                 .url(url)
                 .header("User-Agent", mobileUserAgent)
@@ -195,9 +198,11 @@ internal class BuiltInParser(context: Context) {
             }
         } catch (e: Exception) {
             null
-        }?.let { finalUrl ->
-            videoIdPattern.matcher(finalUrl).let { if (it.find()) it.group(1) else null }
-        }
+        } ?: return null
+        videoIdPattern.matcher(finalUrl).let { if (it.find()) return it.group(1) }
+        // 兜底：从最终 URL 中取第一个 15-21 位数字串
+        bareIdPattern.matcher(finalUrl).let { if (it.find()) return it.group(1) }
+        return null
     }
 
     // ========== HTTP 请求 ==========

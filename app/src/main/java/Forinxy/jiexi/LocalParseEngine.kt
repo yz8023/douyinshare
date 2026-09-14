@@ -27,8 +27,11 @@ internal class LocalParseEngine(
     private val bridge = DouyinAuthorWebApiBridge(application.applicationContext)
     private val gson = Gson()
     private val mobileUserAgent: String by lazy { NativeLib.getParserUserAgent() }
-    private val awemeIdPattern = Pattern.compile("/video/(\\d{15,21})")
+    // 同时支持视频（/video/）与图集图文（/note/）路径
+    private val awemeIdPattern = Pattern.compile("/(?:video|note)/(\\d{15,21})")
     private val plainIdPattern = Pattern.compile("^(\\d{15,21})$")
+    // 重定向 URL 兜底：直接取第一个 15-21 位纯数字串
+    private val bareIdPattern = Pattern.compile("(\\d{15,21})")
     private val shortLinkClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .followRedirects(true)
@@ -98,7 +101,7 @@ internal class LocalParseEngine(
     }
 
     private suspend fun resolveViaHttpRedirect(rawUrl: String): String? = withContext(Dispatchers.IO) {
-        runCatching {
+        val finalUrl = runCatching {
             val request = Request.Builder()
                 .url(rawUrl)
                 .header("User-Agent", mobileUserAgent)
@@ -107,9 +110,11 @@ internal class LocalParseEngine(
             shortLinkClient.newCall(request).execute().use { response ->
                 response.request.url.toString()
             }
-        }.getOrNull()?.let { finalUrl ->
-            awemeIdPattern.matcher(finalUrl).let { if (it.find()) return@let it.group(1) else return@let null }
-        }
+        }.getOrNull() ?: return@withContext null
+        awemeIdPattern.matcher(finalUrl).let { if (it.find()) return@withContext it.group(1) }
+        // 兜底：从最终 URL 中取第一个 15-21 位数字串（图文 /note/ 路径等）
+        bareIdPattern.matcher(finalUrl).let { if (it.find()) return@withContext it.group(1) }
+        null
     }
 
     /** 与 AuthorBatchManager.parseAwemeItem 对齐但面向本地单条解析的最小映射 */
