@@ -1,6 +1,7 @@
 package Forinxy.jiexi
 
 import Forinxy.jiexi.data.GalleryMedia
+import Forinxy.jiexi.data.LyricLine
 import Forinxy.jiexi.data.ParseResult
 import Forinxy.jiexi.data.VideoQualityOption
 import com.google.gson.Gson
@@ -176,6 +177,23 @@ object ServerApiClient {
             }
         }.getOrNull()
 
+        val lyrics = runCatching {
+            root.get("lyrics")?.takeIf { it.isJsonArray }?.asJsonArray?.mapNotNull { el ->
+                if (el.isJsonNull) return@mapNotNull null
+                val obj = el.asJsonObject
+                val text = runCatching {
+                    obj.get("text")?.takeIf { !it.isJsonNull }?.asString
+                }.getOrNull()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                val start = runCatching {
+                    obj.get("start")?.takeIf { !it.isJsonNull }?.asDouble
+                }.getOrNull()
+                val end = runCatching {
+                    obj.get("end")?.takeIf { !it.isJsonNull }?.asDouble
+                }.getOrNull()
+                LyricLine(text = text, start = start, end = end)
+            }
+        }.getOrNull()
+
         return ParseResult.Success(
             author = str("author") ?: "未知作者",
             authorUid = str("author_uid"),
@@ -195,7 +213,8 @@ object ServerApiClient {
             source = "server",
             batchId = batchId,
             originalPlayUrl = str("original_play_url"),
-            qualityList = qualityList
+            qualityList = qualityList,
+            lyrics = lyrics
         )
     }
 

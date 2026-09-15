@@ -14,6 +14,7 @@ import Forinxy.jiexi.data.BatchAuthorParseSummary
 import Forinxy.jiexi.data.BatchParseResult
 import Forinxy.jiexi.data.GalleryMedia
 import Forinxy.jiexi.data.HistoryRepository
+import Forinxy.jiexi.data.LyricLine
 import Forinxy.jiexi.data.ParseResult
 import Forinxy.jiexi.data.VideoQualityOption
 import Forinxy.jiexi.data.galleryItems
@@ -240,6 +241,12 @@ class ParserViewModel(application: Application) : AndroidViewModel(application) 
         private const val SAVE_MUSIC_LABEL = "\u6b63\u5728\u4fdd\u5b58\u97f3\u4e50..."
         private const val SAVE_MUSIC_SUCCESS = "\u97f3\u4e50\u4fdd\u5b58\u6210\u529f"
         private const val SAVE_MUSIC_FAILED = "\u4fdd\u5b58\u97f3\u4e50\u5931\u8d25\uff1a\u65e0\u6cd5\u83b7\u53d6\u97f3\u4e50\u5730\u5740"
+        private const val SAVE_COVER_LABEL = "\u6b63\u5728\u4fdd\u5b58\u5c01\u9762..."
+        private const val SAVE_COVER_SUCCESS = "\u5c01\u9762\u4fdd\u5b58\u6210\u529f"
+        private const val SAVE_COVER_FAILED = "\u4fdd\u5b58\u5c01\u9762\u5931\u8d25\uff1a\u65e0\u6cd5\u83b7\u53d6\u5c01\u9762\u5730\u5740"
+        private const val SAVE_LYRICS_LABEL = "\u6b63\u5728\u4fdd\u5b58\u6b4c\u8bcd..."
+        private const val SAVE_LYRICS_SUCCESS = "\u6b4c\u8bcd\u4fdd\u5b58\u6210\u529f"
+        private const val SAVE_LYRICS_FAILED = "\u6b4c\u8bcd\u4fdd\u5b58\u5931\u8d25"
         private const val MUSIC_SAVE_SUBPATH = "dyparse/music"
         private const val SAVE_BATCH_ALL_SUCCESS = "\u6279\u91cf\u4fdd\u5b58\u5b8c\u6210"
         private const val SAVE_BATCH_PARTIAL_FAILED = "\u6279\u91cf\u4fdd\u5b58\u5b8c\u6210\uff0c\u4f46\u6709\u90e8\u5206\u5931\u8d25"
@@ -1653,6 +1660,129 @@ private suspend fun performParse(input: String, useCookie: Boolean = false): Par
         _saveState.value = SaveState()
         if (success) {
             Toast.makeText(context, SAVE_MUSIC_SUCCESS, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /** 保存音乐封面到下载目录 */
+    fun saveCover(context: Context, result: ParseResult.Success) {
+        if (_saveState.value.isSaving) return
+        if (!SecurityGuard.enforce(context.applicationContext)) {
+            Toast.makeText(context, SERVICE_UNAVAILABLE_MESSAGE, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val coverUrl = result.cover
+        if (coverUrl.isNullOrBlank()) {
+            Toast.makeText(context, SAVE_COVER_FAILED, Toast.LENGTH_SHORT).show()
+            return
+        }
+        viewModelScope.launch {
+            _saveState.value = SaveState(
+                isSaving = true,
+                total = 1,
+                current = 0,
+                progress = 0f,
+                label = SAVE_COVER_LABEL,
+                indeterminate = false
+            )
+            val fileName = result.titlePrefixForFileName()
+                .let { buildBaseMediaName(it, result.author, "cover") }
+            val success = saveFile(
+                context = context,
+                client = downloadClient,
+                url = coverUrl,
+                headers = emptyMap(),
+                mimeType = contentTypeFromUrl(coverUrl) ?: "image/jpeg",
+                timestamp = result.timestamp,
+                fileName = fileName,
+                subPathOverride = MUSIC_SAVE_SUBPATH,
+                extensionOverride = null
+            ) { bytes, total ->
+                if (total > 0) {
+                    withContext(Dispatchers.Main.immediate) {
+                        _saveState.value = _saveState.value.copy(
+                            current = 1,
+                            progress = bytes.toFloat() / total
+                        )
+                    }
+                }
+            }
+            _saveState.value = SaveState()
+            Toast.makeText(
+                context,
+                if (success) SAVE_COVER_SUCCESS else "\u5c01\u9762\u4fdd\u5b58\u5931\u8d25",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
+    /** 保存歌词文本到下载目录（.lrc 或 .txt） */
+    fun saveLyrics(context: Context, result: ParseResult.Success, asLrc: Boolean = true) {
+        if (_saveState.value.isSaving) return
+        if (!SecurityGuard.enforce(context.applicationContext)) {
+            Toast.makeText(context, SERVICE_UNAVAILABLE_MESSAGE, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val lines = result.lyrics.orEmpty()
+        if (lines.isEmpty()) {
+            Toast.makeText(context, SAVE_LYRICS_FAILED, Toast.LENGTH_SHORT).show()
+            return
+        }
+        viewModelScope.launch {
+            _saveState.value = SaveState(
+                isSaving = true,
+                total = 1,
+                current = 0,
+                progress = 0f,
+                label = SAVE_LYRICS_LABEL,
+                indeterminate = true
+            )
+            val fileName = result.titlePrefixForFileName()
+                .let { buildBaseMediaName(it, result.author, "lyrics") }
+            val text = if (asLrc) buildLrc(lines) else lines.joinToString("\n") { it.text }
+            val extension = if (asLrc) "lrc" else "txt"
+            val success = saveTextFile(
+                context = context,
+                fileName = fileName,
+                content = text,
+                extension = extension,
+                mimeType = "text/plain",
+                subPath = MUSIC_SAVE_SUBPATH
+            )
+            _saveState.value = SaveState()
+            Toast.makeText(
+                context,
+                if (success) SAVE_LYRICS_SUCCESS else SAVE_LYRICS_FAILED,
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
+    private fun buildLrc(lines: List<LyricLine>): String {
+        val sb = StringBuilder()
+        lines.forEach { line ->
+            val ts = line.start?.let { formatLrcTime(it) }
+            if (ts != null) {
+                sb.append('[').append(ts).append(']')
+            }
+            sb.append(line.text).append('\n')
+        }
+        return sb.toString()
+    }
+
+    private fun formatLrcTime(seconds: Double): String {
+        val totalMs = (seconds * 1000).toInt()
+        val mm = totalMs / 60000
+        val ss = (totalMs % 60000) / 1000
+        val ms = totalMs % 1000
+        return String.format(java.util.Locale.US, "%02d:%02d.%02d", mm, ss, ms / 10)
+    }
+
+    private fun contentTypeFromUrl(url: String): String? {
+        val lower = url.lowercase()
+        return when {
+            lower.contains(".png") || lower.contains(".webp") -> "image/png"
+            lower.contains(".gif") -> "image/gif"
+            else -> "image/jpeg"
         }
     }
 

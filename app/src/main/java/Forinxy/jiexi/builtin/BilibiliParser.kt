@@ -70,8 +70,8 @@ internal class BilibiliParser(private val http: PlatformHttp) : PlatformParser {
             ?: viewData.asArray("pages")?.firstJsonObject()?.asLong("cid")
             ?: return failResponse("视频信息缺失，请稍后重试")
 
-        val playUrl = "https://api.bilibili.com/x/web-interface/playurl" +
-            "?bvid=$realBvid&cid=$cid&qn=112&fnval=3&platform=html5"
+        val playUrl = "https://api.bilibili.com/x/player/playurl" +
+            "?otype=json&fnver=0&fnval=3&player=3&qn=112&bvid=$realBvid&cid=$cid&platform=html5&high_quality=1"
         val playData = fetchPlay(playUrl) ?: return failResponse("获取播放地址失败，请稍后重试")
         val directUrl = extractPlayUrl(playData)
             ?: return failResponse("未获取到可播放的视频地址")

@@ -132,6 +132,85 @@ suspend fun saveFile(
     false
 }
 
+/** 保存纯文本文件（歌词 .lrc/.txt 等）到 Downloads/dyparse/music。 */
+suspend fun saveTextFile(
+    context: Context,
+    fileName: String,
+    content: String,
+    extension: String,
+    mimeType: String = "text/plain",
+    subPath: String = MUSIC_SAVE_SUBPATH
+): Boolean = withContext(Dispatchers.IO) {
+    val safeName = fileName.let { ensureExtension(it, extension) }
+    try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            var lastError: Exception? = null
+            val resolver = context.contentResolver
+            for (attempt in 0 until MAX_MEDIASTORE_NAME_ATTEMPTS) {
+                val candidateFileName = if (attempt == 0) safeName else buildUniqueFileName(safeName, attempt)
+                val contentValues = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, candidateFileName)
+                    put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+                    put(
+                        MediaStore.MediaColumns.RELATIVE_PATH,
+                        "${Environment.DIRECTORY_DOWNLOADS}/$subPath"
+                    )
+                    put(MediaStore.MediaColumns.IS_PENDING, 1)
+                }
+                val uri = try {
+                    resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+                        ?: throw IOException("Cannot create MediaStore record")
+                } catch (error: Exception) {
+                    lastError = error
+                    if (isDuplicateMediaStoreError(error) && attempt < MAX_MEDIASTORE_NAME_ATTEMPTS - 1) {
+                        continue
+                    }
+                    throw error
+                }
+                try {
+                    resolver.openOutputStream(uri)?.use { stream ->
+                        BufferedOutputStream(stream, STREAM_BUFFER_SIZE).use { out ->
+                            out.write(content.toByteArray(Charsets.UTF_8))
+                            out.flush()
+                        }
+                    } ?: throw IOException("Cannot open output stream")
+                    contentValues.clear()
+                    contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                    resolver.update(uri, contentValues, null, null)
+                    return@withContext true
+                } catch (error: Exception) {
+                    resolver.delete(uri, null, null)
+                    throw error
+                }
+            }
+            throw lastError ?: IOException("Cannot create MediaStore record")
+        } else {
+            @Suppress("DEPRECATION")
+            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            val appDir = File(downloadsDir, subPath)
+            if (!appDir.exists() && !appDir.mkdirs()) {
+                throw IOException("Cannot create save directory")
+            }
+            val targetFile = createUniqueFile(appDir, safeName)
+            FileOutputStream(targetFile).use { stream ->
+                BufferedOutputStream(stream, STREAM_BUFFER_SIZE).use { out ->
+                    out.write(content.toByteArray(Charsets.UTF_8))
+                    out.flush()
+                }
+            }
+            true
+        }
+    } catch (error: Exception) {
+        Log.e("SaveError", "save text file failed: $fileName", error)
+        withContext(Dispatchers.Main.immediate) {
+            Toast.makeText(context, "歌词保存失败: ${error.message}", Toast.LENGTH_SHORT).show()
+        }
+        false
+    }
+}
+
+private const val MUSIC_SAVE_SUBPATH = "dyparse/music"
+
 private suspend fun downloadAndSaveOnce(
     context: Context,
     client: OkHttpClient,

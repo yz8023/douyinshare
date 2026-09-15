@@ -20,9 +20,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -79,6 +82,7 @@ internal fun ParseItemDetailDialog(
     val saveState by viewModel.saveState
 
     var showImageSaveDialog by remember { mutableStateOf(false) }
+    var showLyricsDialog by remember { mutableStateOf(false) }
     var currentItem by remember(item) { mutableStateOf(item) }
     var playUrl by remember { mutableStateOf<String?>(null) }
     var isLoadingUrl by remember { mutableStateOf(false) }
@@ -282,11 +286,16 @@ internal fun ParseItemDetailDialog(
 
                     Button(
                         onClick = {
-                            if (displayItem.type == "video") {
-                                viewModel.saveMedia(context, displayItem)
-                                onDismiss()
-                            } else {
-                                showImageSaveDialog = true
+                            when (displayItem.type) {
+                                "video" -> {
+                                    viewModel.saveMedia(context, displayItem)
+                                    onDismiss()
+                                }
+                                "music" -> {
+                                    viewModel.saveMedia(context, displayItem)
+                                    onDismiss()
+                                }
+                                else -> showImageSaveDialog = true
                             }
                         },
                         enabled = !saveState.isSaving && !isLoadingUrl,
@@ -297,9 +306,77 @@ internal fun ParseItemDetailDialog(
                         shape = RoundedCornerShape(4.dp)
                     ) {
                         Text(
-                            text = if (displayItem.type == "video") "保存视频" else "保存图片",
+                            text = when (displayItem.type) {
+                                "video" -> "保存视频"
+                                "music" -> "保存音乐"
+                                else -> "保存图片"
+                            },
                             fontSize = 10.sp
                         )
+                    }
+                }
+
+                if (displayItem.type == "music" &&
+                    !displayItem.lyrics.isNullOrEmpty() ||
+                    displayItem.type == "music" && !displayItem.cover.isNullOrBlank()
+                ) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        if (!displayItem.lyrics.isNullOrEmpty()) {
+                            OutlinedButton(
+                                onClick = { showLyricsDialog = true },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(30.dp),
+                                contentPadding = PaddingValues(0.dp),
+                                shape = RoundedCornerShape(4.dp),
+                                border = BorderStroke(
+                                    width = 1.dp,
+                                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                                )
+                            ) {
+                                Text("查看歌词", fontSize = 10.sp)
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.saveLyrics(context, displayItem, asLrc = true)
+                                },
+                                enabled = !saveState.isSaving,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(30.dp),
+                                contentPadding = PaddingValues(0.dp),
+                                shape = RoundedCornerShape(4.dp),
+                                border = BorderStroke(
+                                    width = 1.dp,
+                                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                                )
+                            ) {
+                                Text("下载歌词", fontSize = 10.sp)
+                            }
+                        }
+                        if (!displayItem.cover.isNullOrBlank()) {
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.saveCover(context, displayItem)
+                                },
+                                enabled = !saveState.isSaving,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(30.dp),
+                                contentPadding = PaddingValues(0.dp),
+                                shape = RoundedCornerShape(4.dp),
+                                border = BorderStroke(
+                                    width = 1.dp,
+                                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                                )
+                            ) {
+                                Text("保存封面", fontSize = 10.sp)
+                            }
+                        }
                     }
                 }
             }
@@ -335,6 +412,84 @@ internal fun ParseItemDetailDialog(
             context = context
         )
     }
+
+    if (showLyricsDialog) {
+        LyricsViewDialog(
+            item = displayItem,
+            onDismiss = { showLyricsDialog = false },
+            viewModel = viewModel,
+            context = context
+        )
+    }
+}
+
+@Composable
+private fun LyricsViewDialog(
+    item: ParseResult.Success,
+    onDismiss: () -> Unit,
+    viewModel: ParserViewModel,
+    context: Context
+) {
+    val lines = item.lyrics.orEmpty()
+    val saveState by viewModel.saveState
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("歌词", style = MaterialTheme.typography.titleMedium)
+                TextButton(
+                    onClick = { viewModel.saveLyrics(context, item, asLrc = true) },
+                    enabled = !saveState.isSaving
+                ) {
+                    Text(if (saveState.isSaving) "保存中…" else "保存为 .lrc", fontSize = 12.sp)
+                }
+            }
+        },
+        text = {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 320.dp)
+            ) {
+                items(lines.size, key = { it }) { index ->
+                    val line = lines[index]
+                    val timeText = line.start?.let {
+                        val mm = it.toInt() / 60
+                        val ss = (it % 60).toInt()
+                        String.format("%02d:%02d", mm, ss)
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        if (timeText != null) {
+                            Text(
+                                text = timeText,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.width(52.dp)
+                            )
+                        }
+                        Text(
+                            text = line.text,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("关闭", fontSize = 12.sp)
+            }
+        }
+    )
 }
 
 @Composable

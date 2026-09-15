@@ -71,6 +71,7 @@ internal class QiShuiMusicParser(private val http: PlatformHttp) : PlatformParse
         md.videoId = trackId ?: videoIdFromData.orEmpty()
         md.inputUrl = input
         md.resolvedUrl = resolvedUrl
+        md.lyrics.addAll(lyrics)
         md.addQuality("标准", "default", playable, isOriginal = true)
         return md
     }
@@ -172,6 +173,24 @@ internal class QiShuiMusicParser(private val http: PlatformHttp) : PlatformParse
                 if (durationSec <= 0.0) durationSec = bestEffortDuration(track)
             }
 
+            val lyricsOpt = pageData.asObject("audioWithLyricsOption") ?: pageData.asObject("track")
+            if (lyricsOpt != null) {
+                if (title.isBlank()) {
+                    title = lyricsOpt.asString("trackName")
+                        ?: lyricsOpt.asString("videoName")
+                        ?: lyricsOpt.asString("songName").orEmpty()
+                }
+                if (authorNickname.isBlank()) {
+                    authorNickname = lyricsOpt.asString("artistName").orEmpty()
+                }
+                if (coverUrl.isNullOrBlank()) {
+                    coverUrl = lyricsOpt.asString("coverURL")
+                        ?: lyricsOpt.asString("coverUrl")
+                        ?: lyricsOpt.asString("cover_url")
+                }
+                extractLyricsFrom(lyricsOpt)
+            }
+
             val found = extractCollection(pageData)
             if (found.isNotEmpty() && collectionTracks.isEmpty()) {
                 collectionTracks = found
@@ -183,6 +202,63 @@ internal class QiShuiMusicParser(private val http: PlatformHttp) : PlatformParse
         }
     }
 
+    /**
+     * 参照参考实现的 _extract_subtitles_from_dict：
+     * 1) songMakerTeamSentences / sentences / lyrics / subtitles 数组（字符串或 {text|start_time|end_time}）
+     * 2) lrc / lyric / lyrics_text / lyric_string 文本
+     */
+    private fun extractLyricsFrom(o: JsonObject) {
+        if (lyrics.isNotEmpty()) return
+        val sentences = o.asArray("songMakerTeamSentences")
+            ?: o.asArray("sentences")
+            ?: o.asArray("lyrics")
+            ?: o.asArray("subtitles")
+        if (sentences != null && sentences.size() > 0) {
+            for (el in sentences) {
+                if (el.isJsonPrimitive) {
+                    el.asString.takeIf { it.isNotBlank() }?.let { lyrics.add(LyricLine(it)) }
+                } else if (el.isJsonObject) {
+                    val obj = el.asJsonObject
+                    val text = obj.asString("text") ?: obj.asString("content")
+                        ?: obj.asString("sentence") ?: obj.asString("lyric")
+                    if (!text.isNullOrBlank()) {
+                        val start = obj.asDouble("start_time") ?: obj.asDouble("startTime")
+                        val end = obj.asDouble("end_time") ?: obj.asDouble("endTime")
+                        lyrics.add(LyricLine(text.trim(), normalizeSec(start), normalizeSec(end)))
+                    }
+                }
+            }
+            if (lyrics.isNotEmpty()) return
+        }
+        val lrcText = o.asString("lrc") ?: o.asString("lyric")
+            ?: o.asString("lyrics_text") ?: o.asString("lyric_string")
+        if (!lrcText.isNullOrBlank()) {
+            parseLrc(lrcText)
+        }
+    }
+
+    /** [mm:ss] 或 [mm:ss.xx] 的 LRC 文本解析 */
+    private fun parseLrc(lrcText: String) {
+        LRC_PATTERN.findAll(lrcText).forEach { m ->
+            val minutes = m.groupValues[1].toIntOrNull() ?: 0
+            val seconds = m.groupValues[2].toDoubleOrNull() ?: 0.0
+            val text = m.groupValues[3].trim()
+            if (text.isNotEmpty()) {
+                lyrics.add(LyricLine(text, start = minutes * 60 + seconds))
+            }
+        }
+        if (lyrics.isEmpty()) {
+            lrcText.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.forEach { line ->
+                if (!line.startsWith("[")) lyrics.add(LyricLine(line))
+            }
+        }
+    }
+
+    private fun normalizeSec(v: Double?): Double? {
+        if (v == null) return null
+        return if (v > 1000.0) v / 1000.0 else v
+    }
+
     /** 分享页 HTML 没有可用数据时，回退 beta-luna seo_track 接口。 */
     private fun parseSeoPayload() {
         val id = trackId
@@ -192,6 +268,8 @@ internal class QiShuiMusicParser(private val http: PlatformHttp) : PlatformParse
         if (resp.statusCode !in 200..299) return
         val payload = parseJson(resp.body) ?: return
         val track = payload.asObject("seo_track")?.asObject("track") ?: return
+
+        extractLyricsFrom(track)
 
         if (title.isBlank()) title = track.asString("name").orEmpty()
         val artist = track.asArray("artists")?.firstOrNull()
@@ -361,6 +439,7 @@ internal class QiShuiMusicParser(private val http: PlatformHttp) : PlatformParse
     private var resolvedUrl: String? = null
     private var collectionName: String = ""
     private var collectionTracks: List<TrackItem> = emptyList()
+    private val lyrics = mutableListOf<LyricLine>()
 
     /** 解析器实例会被复用（MultiPlatformParser 按平台单例），每次解析前清空状态 */
     private fun resetState() {
@@ -376,6 +455,7 @@ internal class QiShuiMusicParser(private val http: PlatformHttp) : PlatformParse
         resolvedUrl = null
         collectionName = ""
         collectionTracks = emptyList()
+        lyrics.clear()
     }
 
     private companion object {
@@ -401,6 +481,8 @@ internal class QiShuiMusicParser(private val http: PlatformHttp) : PlatformParse
         val ROUTER_DATA = Regex("_ROUTER_DATA\\s*=\\s*(\\{.*?\\});", RegexOption.DOT_MATCHES_ALL)
         val TRACK_ID_PARAM = Regex("(?:track_id|ugc_video_id)=([^&#\\s]+)")
         val PATH_PREFIXES = listOf("/track/", "/video/")
+        val LRC_PATTERN =
+            Regex("\\[(\\d{1,3}):(\\d{1,2})(?:\\.(\\d{1,3}))?]\\s*(.*)")
         val COLLECTION_KEYS = listOf(
             "playList", "playlist", "playListOptions", "playlistOptions",
             "trackList", "songList", "songs", "musicList"

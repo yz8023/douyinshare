@@ -21,6 +21,13 @@ class GalleryItem(
     val livePhotoRawUrl: String? = null
 )
 
+/** 歌词行（LRC 风格：start/end 单位为秒，text 为行文本） */
+class LyricLine(
+    val text: String,
+    val start: Double? = null,
+    val end: Double? = null
+)
+
 /**
  * 平台无关的解析结果载体。各平台解析器把提取到的数据装进 MediaData，
  * 再由 [toServerJson] 输出与 server/data.php 1:1 兼容的 JSON 字符串，
@@ -45,6 +52,7 @@ class MediaData {
 
     val gallery = mutableListOf<GalleryItem>()
     private val qualities = mutableListOf<QualityOption>()
+    val lyrics = mutableListOf<LyricLine>()
 
     val isImage: Boolean get() = type == "image"
     val isMusic: Boolean get() = type == "music"
@@ -143,6 +151,18 @@ class MediaData {
         } else {
             obj.add("quality_list", JsonArray())
         }
+
+        val lyricsArray = JsonArray()
+        lyrics.forEach { line ->
+            val entry = JsonObject()
+            entry.addProperty("text", line.text)
+            if (line.start != null) entry.addProperty("start", line.start)
+            else entry.add("start", com.google.gson.JsonNull.INSTANCE)
+            if (line.end != null) entry.addProperty("end", line.end)
+            else entry.add("end", com.google.gson.JsonNull.INSTANCE)
+            lyricsArray.add(entry)
+        }
+        obj.add("lyrics", lyricsArray)
 
         if (resolvedUrl != null) obj.addProperty("resolved_url", resolvedUrl)
         else obj.add("resolved_url", com.google.gson.JsonNull.INSTANCE)

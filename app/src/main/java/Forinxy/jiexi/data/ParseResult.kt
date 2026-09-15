@@ -1,5 +1,12 @@
 package Forinxy.jiexi.data
 
+/** 歌词行：text 为行文本，start/end 单位为秒 */
+data class LyricLine(
+    val text: String,
+    val start: Double? = null,
+    val end: Double? = null
+)
+
 data class GalleryMedia(
     val index: Int = 0,
     val imageUrl: String? = null,
@@ -49,7 +56,9 @@ sealed class ParseResult {
         // 服务器一次返回的原画质/最高画质地址（保存时直接用，避免二次请求）
         val originalPlayUrl: String? = null,
         // 服务器返回的全部可选画质（含预估大小），供保存前选择
-        val qualityList: List<VideoQualityOption>? = null
+        val qualityList: List<VideoQualityOption>? = null,
+        // 歌词行（LRC 风格：text / start / end，秒）
+        val lyrics: List<LyricLine>? = null
     ) : ParseResult()
 
     data class Error(val msg: String) : ParseResult()

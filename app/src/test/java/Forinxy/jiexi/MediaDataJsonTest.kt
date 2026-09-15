@@ -1,6 +1,7 @@
 package Forinxy.jiexi
 
 import Forinxy.jiexi.builtin.GalleryItem
+import Forinxy.jiexi.builtin.LyricLine
 import Forinxy.jiexi.builtin.MediaData
 import com.google.gson.JsonParser
 import org.junit.Assert.assertEquals
@@ -81,5 +82,30 @@ class MediaDataJsonTest {
         assertTrue(root.get("author_uid").isJsonNull)
         assertTrue(root.get("cover").isJsonNull)
         assertTrue(root.get("resolved_url").isJsonNull)
+    }
+
+    @Test
+    fun music_lyrics_serialize_with_lrc_fields() {
+        val md = MediaData()
+        md.type = "music"
+        md.playUrl = "https://example.com/song.mp3"
+        md.lyrics.add(LyricLine(text = "第一句", start = 1.5, end = 4.5))
+        md.lyrics.add(LyricLine(text = "第二句（无时间）"))
+
+        val root = parseRoot(md.toServerJson())
+        val lyrics = root.getAsJsonArray("lyrics")
+        assertEquals(2, lyrics.size())
+        assertEquals("第一句", lyrics[0].asJsonObject.get("text").asString)
+        assertEquals(1.5, lyrics[0].asJsonObject.get("start").asDouble, 0.001)
+        assertEquals(4.5, lyrics[0].asJsonObject.get("end").asDouble, 0.001)
+        assertTrue(lyrics[1].asJsonObject.get("start").isJsonNull)
+    }
+
+    @Test
+    fun non_music_output_has_empty_lyrics() {
+        val md = MediaData()
+        val root = parseRoot(md.toServerJson())
+        assertTrue(root.has("lyrics"))
+        assertEquals(0, root.getAsJsonArray("lyrics").size())
     }
 }
