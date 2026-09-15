@@ -7,6 +7,8 @@ import com.google.gson.JsonArray
 import com.google.gson.JsonElement
 import com.google.gson.JsonNull
 import com.google.gson.JsonObject
+import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
@@ -137,10 +139,19 @@ internal class BuiltInParser(context: Context) : PlatformParser {
         val (html, resolvedUrl) = requestWithCookie(shareUrl, cookieHeader)
             ?: return fail("分享页请求失败")
 
-        val item = extractAwemeItem(html)
-            ?: return fail("解析失败：分享页未包含作品数据")
+        var item = extractAwemeItem(html)
+        var finalUrl = resolvedUrl
+        if (item == null) {
+            // 分享页被过滤（限时日常 story_25_filter 等）：回退 detail API（a_bogus 签名 + cookie）
+            val detail = fetchDetailItem(videoId, cookieHeader)
+            if (detail != null) {
+                item = detail.first
+                finalUrl = detail.second
+            }
+        }
+        item ?: return fail("解析失败：分享页未包含作品数据")
 
-        return buildSuccessJson(item, videoId, input, resolvedUrl, useCookie, original, highest)
+        return buildSuccessJson(item, videoId, input, finalUrl, useCookie, original, highest)
     }
 
     /** 诊断：data.php?diag=1 的同构响应（供测试连接用） */
@@ -230,6 +241,90 @@ internal class BuiltInParser(context: Context) : PlatformParser {
             Log.w(TAG, "Share page request failed: $url", e)
             null
         }
+    }
+
+    // ========== detail API 兜底（分享页被过滤时） ==========
+
+    /**
+     * 请求 aweme/v1/web/aweme/detail/（带 a_bogus 签名 + cookie）。
+     * 返回 (aweme_detail item, 最终请求 URL)；失败返回 null。
+     */
+    private fun fetchDetailItem(videoId: String, cookieHeader: String): Pair<JsonObject, String>? {
+        return try {
+            val msToken = Forinxy.jiexi.DouyinAuthStore.extractCookieValue(cookieHeader, "msToken")
+                ?: Forinxy.jiexi.DouyinABogusSigner.generateMsToken()
+            val signedUrl = Forinxy.jiexi.DouyinABogusSigner.sign(
+                buildDetailUrl(videoId, msToken),
+                DESKTOP_UA
+            )
+            val request = Request.Builder()
+                .url(signedUrl)
+                .header("User-Agent", DESKTOP_UA)
+                .header("Referer", "https://www.douyin.com/")
+                .apply {
+                    if (cookieHeader.isNotBlank()) {
+                        header("Cookie", cookieHeader)
+                    }
+                }
+                .build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    Log.w(TAG, "Detail API failed: ${response.code}")
+                    return@use null
+                }
+                val body = response.body?.string().orEmpty()
+                if (body.isEmpty()) {
+                    Log.w(TAG, "Detail API empty body")
+                    return@use null
+                }
+                val json = parseJson(body)
+                val item = json?.asObject("aweme_detail") ?: run {
+                    Log.w(TAG, "Detail API no aweme_detail: ${body.take(200)}")
+                    null
+                }
+                if (item == null) null else item to response.request.url.toString()
+            }
+        } catch (e: IOException) {
+            Log.w(TAG, "Detail API request failed", e)
+            null
+        }
+    }
+
+    /** 构造 detail API 未签名 URL（参数与服务器 data.php 一致） */
+    private fun buildDetailUrl(videoId: String, msToken: String): HttpUrl {
+        return "https://www.douyin.com/aweme/v1/web/aweme/detail/".toHttpUrl()
+            .newBuilder()
+            .addQueryParameter("device_platform", "webapp")
+            .addQueryParameter("aid", "6383")
+            .addQueryParameter("channel", "channel_pc_web")
+            .addQueryParameter("aweme_id", videoId)
+            .addQueryParameter("update_version_code", "170400")
+            .addQueryParameter("pc_client_type", "1")
+            .addQueryParameter("pc_libra_divert", "Windows")
+            .addQueryParameter("support_h265", "1")
+            .addQueryParameter("support_dash", "1")
+            .addQueryParameter("version_code", "290100")
+            .addQueryParameter("version_name", "29.1.0")
+            .addQueryParameter("cookie_enabled", "true")
+            .addQueryParameter("screen_width", "1920")
+            .addQueryParameter("screen_height", "1080")
+            .addQueryParameter("browser_language", "zh-CN")
+            .addQueryParameter("browser_platform", "Win32")
+            .addQueryParameter("browser_name", "Chrome")
+            .addQueryParameter("browser_version", "130.0.0.0")
+            .addQueryParameter("browser_online", "true")
+            .addQueryParameter("engine_name", "Blink")
+            .addQueryParameter("engine_version", "130.0.0.0")
+            .addQueryParameter("os_name", "Windows")
+            .addQueryParameter("os_version", "10")
+            .addQueryParameter("cpu_core_num", "12")
+            .addQueryParameter("device_memory", "8")
+            .addQueryParameter("platform", "PC")
+            .addQueryParameter("downlink", "10")
+            .addQueryParameter("effective_type", "4g")
+            .addQueryParameter("round_trip_time", "100")
+            .addQueryParameter("msToken", msToken)
+            .build()
     }
 
     /** 跟随重定向拿最终可播放地址（aweme/v1/play 会 302 到真实 CDN 地址） */
@@ -1067,6 +1162,9 @@ internal class BuiltInParser(context: Context) : PlatformParser {
 
         val DEFAULT_MOBILE_UA =
             "Mozilla/5.0 (Linux; Android 13; SM-G998B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36"
+
+        val DESKTOP_UA =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
 
         val QUALITY_RES_PATTERN = Pattern.compile(
             "(?<![0-9])(2160|1440|1280|1080|960|720|540|480|360)\\s*p?(?![0-9])",
