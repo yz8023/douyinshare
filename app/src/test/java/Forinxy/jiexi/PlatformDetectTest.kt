@@ -357,4 +357,311 @@ class PlatformDetectTest {
             Platform.detect("https://www.pearvideo.com/video_1234567890")
         )
     }
+
+    @Test
+    fun kling_precedes_kuaishou() {
+        // 可灵分享域名是快手子域，必须优先识别为可灵AI
+        assertEquals(
+            Platform.KLING,
+            Platform.detect("https://klingai-share.kuaishou.com/creatives/abc?creative_id=123456")
+        )
+    }
+
+    @Test
+    fun kwaiying_share() {
+        assertEquals(
+            Platform.KWAIYING,
+            Platform.detect("https://share.kwaiying.com/pc/index.html?id=1234567890")
+        )
+    }
+
+    @Test
+    fun peiyinxiu_share() {
+        assertEquals(
+            Platform.PEIYINXIU,
+            Platform.detect("https://www.peiyinxiu.com/dub/123456")
+        )
+    }
+
+    @Test
+    fun pinecone_moment_share() {
+        assertEquals(
+            Platform.PINECONE_MOMENT,
+            Platform.detect("https://m.pineconemoment.com/share/story/123456")
+        )
+    }
+
+    @Test
+    fun dewu_share() {
+        assertEquals(
+            Platform.DEWU,
+            Platform.detect("https://m.dewu.com/pcapp/sns/detail/1234567890")
+        )
+    }
+
+    @Test
+    fun dewu_dw4_short() {
+        assertEquals(
+            Platform.DEWU,
+            Platform.detect("https://dw4.co/AbCdEfG")
+        )
+    }
+
+    @Test
+    fun xianyu_short() {
+        assertEquals(
+            Platform.XIANYU,
+            Platform.detect("https://e.tb.cn/x1y2z3")
+        )
+    }
+
+    @Test
+    fun xianyu_goofish() {
+        assertEquals(
+            Platform.XIANYU,
+            Platform.detect("https://h5.m.goofish.com/item?id=1234567890")
+        )
+    }
+
+    @Test
+    fun soul_share() {
+        assertEquals(
+            Platform.SOUL,
+            Platform.detect("https://w13.soulsmile.cn/post/detail.html?postIdEcpt=abc123")
+        )
+    }
+
+    @Test
+    fun lofter_post() {
+        assertEquals(
+            Platform.LOFTER,
+            Platform.detect("https://www.lofter.com/share/post?id=123456789")
+        )
+    }
+
+    @Test
+    fun hailuo_share() {
+        assertEquals(
+            Platform.HAILUO,
+            Platform.detect("https://hailuoai.com/share/ai-video/1234567890")
+        )
+    }
+
+    @Test
+    fun xiaoyunque_share() {
+        assertEquals(
+            Platform.XIAOYUNQUE,
+            Platform.detect("https://xiaoyunque.jianying.com/s/abc123")
+        )
+    }
+
+    @Test
+    fun wechat_channels_url() {
+        assertEquals(
+            Platform.WECHAT_CHANNELS,
+            Platform.detect("https://channels.weixin.qq.com/wechatfeed/feed/1234567890")
+        )
+    }
+
+    @Test
+    fun wechat_channels_share_text() {
+        assertEquals(
+            Platform.WECHAT_CHANNELS,
+            Platform.detect(
+                "一起来看视频号 #视频号 https://weixin.qq.com/sph/AabcDef12abcdefGh11a"
+            )
+        )
+    }
+
+    @Test
+    fun wechat_channels_mp_precedes() {
+        assertEquals(
+            Platform.WECHAT_MP,
+            Platform.detect("https://mp.weixin.qq.com/s/AbC123xyzQr4")
+        )
+    }
+
+    @Test
+    fun butterflyai_share() {
+        assertEquals(
+            Platform.BUTTERFLYAI,
+            Platform.detect("https://www.butterflyai.cn/share/record/1234567890")
+        )
+    }
+
+    @Test
+    fun butterflyai_short_link() {
+        assertEquals(
+            Platform.BUTTERFLYAI,
+            Platform.detect("https://s.butterflyai.cn/abc123")
+        )
+    }
+
+    @Test
+    fun cctv_news_article() {
+        assertEquals(
+            Platform.CCTV,
+            Platform.detect("https://news.cctv.com/2026/09/15/ARTIabcdef1234567890.shtml")
+        )
+    }
+
+    @Test
+    fun cctv_yangshipin_covered_domain() {
+        assertEquals(
+            Platform.YANG_SHIPIN,
+            Platform.detect("https://v.yangshipin.cn/share?vid=abcdef1234567890")
+        )
+    }
+
+    @Test
+    fun yangshipin_app_share() {
+        assertEquals(
+            Platform.YANG_SHIPIN,
+            Platform.detect("https://yspapp.cn/video/1234567890")
+        )
+    }
+
+    @Test
+    fun fanqie_novel_share() {
+        assertEquals(
+            Platform.FANQIE,
+            Platform.detect("https://novelquickapp.com/page/1234567890")
+        )
+    }
+
+    @Test
+    fun fanqie_short_drama() {
+        assertEquals(
+            Platform.FANQIE,
+            Platform.detect("https://zlink.fqnovel.com/short/abc123")
+        )
+    }
+
+    @Test
+    fun fanqie_fqnovel_app_share() {
+        assertEquals(
+            Platform.FANQIE,
+            Platform.detect("https://fqnovel.com/s/abc123")
+        )
+    }
+
+    @Test
+    fun fanqie_hongguoduanju() {
+        assertEquals(
+            Platform.FANQIE,
+            Platform.detect("https://changdunovel.com/index.html?id=12345")
+        )
+    }
+
+    @Test
+    fun qianwen_share() {
+        assertEquals(
+            Platform.QIANWEN,
+            Platform.detect("https://activity.qianwen.com/chats/share/abc123")
+        )
+    }
+
+    @Test
+    fun tongyi_chat2() {
+        assertEquals(
+            Platform.QIANWEN,
+            Platform.detect("https://chat2-api.qianwen.com/share/chat/xyz789")
+        )
+    }
+
+    @Test
+    fun qianwen_alibaba_studio() {
+        assertEquals(
+            Platform.QIANWEN,
+            Platform.detect("https://pages.tongyi.com/x/share/abc123")
+        )
+    }
+
+    @Test
+    fun quark_ai_share() {
+        assertEquals(
+            Platform.QUARK_AI,
+            Platform.detect("https://act.quark.cn/share/abc123")
+        )
+    }
+
+    @Test
+    fun jianying_lv_share() {
+        assertEquals(
+            Platform.JIANYING,
+            Platform.detect("https://lv.ulikecam.com/detail/24c5a6d7e8f9a0b1c2d3e4f5a6b7c8d9?template_id=1234567890")
+        )
+    }
+
+    @Test
+    fun capcut_share() {
+        assertEquals(
+            Platform.JIANYING,
+            Platform.detect("https://www.capcut.cn/share/1234567890")
+        )
+    }
+
+    @Test
+    fun tencent_channel_post() {
+        assertEquals(
+            Platform.TENCENT_CHANNEL,
+            Platform.detect("https://pd.qq.com/s/abc123/xyz")
+        )
+    }
+
+    @Test
+    fun yuanbao_share() {
+        assertEquals(
+            Platform.YUANBAO,
+            Platform.detect("https://yuanbao.tencent.com/chat/share/abc123")
+        )
+    }
+
+    @Test
+    fun jimeng_share() {
+        assertEquals(
+            Platform.JIMENG,
+            Platform.detect("https://jimeng.jianying.com/ai-video/1234567890")
+        )
+    }
+
+    @Test
+    fun jimeng_short_s() {
+        assertEquals(
+            Platform.JIMENG,
+            Platform.detect("https://jimeng.ai/s/abc123")
+        )
+    }
+
+    @Test
+    fun doubao_thread() {
+        assertEquals(
+            Platform.DOUBAO,
+            Platform.detect("https://www.doubao.com/thread/abc123")
+        )
+    }
+
+    @Test
+    fun doubao_video_share() {
+        assertEquals(
+            Platform.DOUBAO,
+            Platform.detect("https://www.doubao.com/video-sharing?share_id=abc&video_id=xyz")
+        )
+    }
+
+    @Test
+    fun pinduoduo_goods() {
+        assertEquals(
+            Platform.PINDUODUO,
+            Platform.detect("https://mobile.yangkeduo.com/goods.html?goods_id=1234567890")
+        )
+    }
+
+    @Test
+    fun pinduoduo_duoduo_video() {
+        assertEquals(
+            Platform.PINDUODUO,
+            Platform.detect("https://pinduoduo.com/mall_page?feed_id=abc123")
+        )
+    }
 }

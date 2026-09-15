@@ -47,6 +47,9 @@ class ClipboardMonitorService : Service() {
         const val STATUS_DONE = "DONE"
         const val STATUS_FAILED = "FAILED"
 
+        /** 请求立即读取一次剪贴板（悬浮球点按后 App 回到前台时使用） */
+        const val ACTION_POLL_NOW = "Forinxy.jiexi.action.POLL_NOW"
+
         @Volatile
         var running = false
             private set
@@ -68,6 +71,17 @@ class ClipboardMonitorService : Service() {
         fun stop(context: Context) {
             val app = context.applicationContext
             app.stopService(Intent(app, ClipboardMonitorService::class.java))
+        }
+
+        /** 让已在运行的服务立刻读取一次剪贴板（App 处于前台时调用才有效） */
+        fun requestPollNow(context: Context) {
+            if (!running) return
+            val app = context.applicationContext
+            runCatching {
+                app.startService(
+                    Intent(app, ClipboardMonitorService::class.java).setAction(ACTION_POLL_NOW)
+                )
+            }
         }
     }
 
@@ -102,6 +116,9 @@ class ClipboardMonitorService : Service() {
         if (!monitoring) {
             monitoring = true
             scope.launch { monitorLoop() }
+        }
+        if (intent?.action == ACTION_POLL_NOW) {
+            scope.launch { pollClipboardOnce() }
         }
         return START_STICKY
     }

@@ -4,9 +4,12 @@ import android.annotation.SuppressLint
 import android.Manifest
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.view.View
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -65,6 +68,7 @@ import androidx.compose.material.icons.outlined.ContentPaste
 import androidx.compose.material.icons.outlined.Feedback
 import androidx.compose.material.icons.outlined.HighQuality
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.School
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
@@ -76,6 +80,7 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -147,6 +152,7 @@ import Forinxy.jiexi.ui.liquid.LiquidBottomTabs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -302,6 +308,7 @@ fun MainScreen() {
     val parserViewModel: ParserViewModel = viewModel()
     val context = LocalContext.current
     val appContext = remember(context) { context.applicationContext }
+    val isResumed by rememberIsResumed()
     val mediaSaveState by parserViewModel.saveState
     val navigationItems = remember {
         listOf(Screen.Home, Screen.Batch, Screen.Clipboard, Screen.ParseHistory, Screen.Settings)
@@ -329,6 +336,21 @@ fun MainScreen() {
         // 若开启剪贴板监听且前台服务未运行，则启动它（前台应用启动 dataSync 类型服务是允许的）
         if (ClipboardMonitorPreferences.isEnabled(appContext) && !ClipboardMonitorService.running) {
             ClipboardMonitorService.start(appContext)
+        }
+        // 悬浮球已开启且已授权时补启动（例如刚授权返回、或服务被杀后重建）
+        if (FloatingWindowPreferences.isEnabled(appContext) &&
+            FloatingWindowPreferences.canDrawOverlays(appContext) &&
+            !FloatingBallService.running
+        ) {
+            FloatingBallService.start(appContext)
+        }
+    }
+
+    // 回到前台时立即补读一次剪贴板：悬浮球点按后 App 恢复前台即可解析刚复制的内容
+    LaunchedEffect(isResumed) {
+        if (isResumed && ClipboardMonitorPreferences.isEnabled(appContext)) {
+            delay(400)
+            ClipboardMonitorService.requestPollNow(appContext)
         }
     }
 
@@ -1127,6 +1149,13 @@ fun SettingsScreen(active: Boolean = true) {
     var clipboardMonitorEnabled by rememberSaveable {
         mutableStateOf(ClipboardMonitorPreferences.isEnabled(appContext))
     }
+    var floatingWindowEnabled by rememberSaveable {
+        mutableStateOf(FloatingWindowPreferences.isEnabled(appContext))
+    }
+    var floatingWindowAlpha by rememberSaveable {
+        mutableStateOf(FloatingWindowPreferences.getAlpha(appContext))
+    }
+    var showFloatingAlphaDialog by rememberSaveable { mutableStateOf(false) }
     var batchGridColumns by rememberSaveable { mutableStateOf(BatchDisplayPreferences.getBatchGridColumns(appContext)) }
     var batchWorkIntervalMs by rememberSaveable {
         mutableStateOf(BatchParsePreferences.getSettings(appContext).workIntervalMs)
@@ -1175,6 +1204,32 @@ fun SettingsScreen(active: Boolean = true) {
             confirmButton = {
                 TextButton(onClick = { showFeedbackDialog = false }) {
                     Text("好的")
+                }
+            }
+        )
+    }
+
+    if (showFloatingAlphaDialog) {
+        MiuixAlertDialog(
+            onDismissRequest = { showFloatingAlphaDialog = false },
+            title = { Text("悬浮球透明度") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("不透明度 ${(floatingWindowAlpha * 100).toInt()}%")
+                    Slider(
+                        value = floatingWindowAlpha,
+                        onValueChange = { value ->
+                            floatingWindowAlpha = value
+                            FloatingWindowPreferences.setAlpha(appContext, value)
+                            FloatingBallService.updateAlpha(value)
+                        },
+                        valueRange = FloatingWindowPreferences.MIN_ALPHA..FloatingWindowPreferences.MAX_ALPHA
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showFloatingAlphaDialog = false }) {
+                    Text("完成")
                 }
             }
         )
@@ -1551,6 +1606,48 @@ fun SettingsScreen(active: Boolean = true) {
                 )
             }
             item {
+                SettingsSwitchItem(
+                    icon = Icons.AutoMirrored.Outlined.OpenInNew,
+                    title = "悬浮球快捷解析",
+                    subtitle = when {
+                        !floatingWindowEnabled -> "已关闭"
+                        !FloatingWindowPreferences.canDrawOverlays(appContext) ->
+                            "需要「显示在其他应用上层」权限"
+                        else -> "点按悬浮球即可回到 App 解析剪贴板链接"
+                    },
+                    checked = floatingWindowEnabled,
+                    onCheckedChange = { checked ->
+                        floatingWindowEnabled = checked
+                        FloatingWindowPreferences.setEnabled(appContext, checked)
+                        if (checked) {
+                            if (FloatingWindowPreferences.canDrawOverlays(appContext)) {
+                                requestNotificationPermissionIfNeeded(context)
+                                FloatingBallService.start(appContext)
+                            } else {
+                                requestOverlayPermission(context)
+                                Toast.makeText(
+                                    context,
+                                    "请先授予「显示在其他应用上层」权限",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        } else {
+                            FloatingBallService.stop(appContext)
+                        }
+                    }
+                )
+            }
+            if (floatingWindowEnabled) {
+                item {
+                    SettingsItem(
+                        icon = Icons.AutoMirrored.Outlined.OpenInNew,
+                        title = "悬浮球透明度",
+                        subtitle = "不透明度 ${(floatingWindowAlpha * 100).toInt()}%",
+                        onClick = { showFloatingAlphaDialog = true }
+                    )
+                }
+            }
+            item {
                 SettingsItem(
                     icon = Icons.Outlined.CleaningServices,
                     title = "清理缓存",
@@ -1810,6 +1907,16 @@ private fun requestNotificationPermissionIfNeeded(context: Context) {
 }
 
 private const val REQUEST_POST_NOTIFICATIONS = 3001
+
+/** 跳转系统「显示在其他应用上层」授权页 */
+private fun requestOverlayPermission(context: Context) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+    val intent = Intent(
+        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+        Uri.parse("package:${context.packageName}")
+    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    runCatching { context.startActivity(intent) }
+}
 
 @Composable
 private fun SettingsItem(

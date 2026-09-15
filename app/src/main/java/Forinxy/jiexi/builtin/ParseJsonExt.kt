@@ -84,3 +84,12 @@ internal fun JsonArray.firstObjOrNull(): JsonObject? {
 
 internal fun JsonElement.asStrOrNull(): String? =
     if (isJsonPrimitive) runCatching { asString }.getOrNull() else null
+
+/** 依次尝试多个键，返回第一个非空字符串值（字段缺失/JSON null/类型不符都跳过） */
+internal fun JsonObject.firstStr(vararg keys: String): String? {
+    for (key in keys) {
+        val v = get(key)?.asStrOrNull()
+        if (!v.isNullOrBlank()) return v
+    }
+    return null
+}

@@ -36,7 +36,35 @@ enum class Platform(val label: String) {
     KUGOU_MUSIC("酷狗音乐"),
     ACFUN("AcFun"),
     WEISHI("微视"),
-    LISHIPIN("梨视频");
+    LISHIPIN("梨视频"),
+    // ---- media-parser 对齐补充的平台（第二批）----
+    XIANYU("闲鱼"),
+    DEWU("得物"),
+    PINECONE_MOMENT("松果时刻"),
+    KWAIYING("快影"),
+    PEIYINXIU("配音秀"),
+    KLING("可灵AI"),
+    SOUL("Soul"),
+    // ---- media-parser 对齐补充的平台（第三批）----
+    LOFTER("网易LOFTER"),
+    HAILUO("海螺AI"),
+    XIAOYUNQUE("小云雀AI"),
+    // ---- media-parser 对齐补充的平台（第四批）----
+    WECHAT_CHANNELS("视频号"),
+    WECHAT_MP("微信公众号"),
+    // ---- media-parser 对齐补充的平台（第五批）----
+    FANQIE("番茄小说"),
+    JIANYING("剪映"),
+    TENCENT_CHANNEL("腾讯频道"),
+    YUANBAO("腾讯元宝"),
+    DOUBAO("豆包"),
+    JIMENG("即梦AI"),
+    QIANWEN("通义千问"),
+    QUARK_AI("夸克AI"),
+    PINDUODUO("拼多多"),
+    BUTTERFLYAI("星绘AI"),
+    CCTV("央视"),
+    YANG_SHIPIN("央视频");
 
     val isMusic: Boolean
         get() = this == NETEASE_MUSIC || this == QISHUI_MUSIC ||
@@ -84,6 +112,7 @@ enum class Platform(val label: String) {
             return when {
                 // ---- 已有平台（含子域特例优先）----
                 h == "qishui.douyin.com" || h == "music.douyin.com" -> QISHUI_MUSIC
+                hostsMatch(h, "klingai-share.kuaishou.com") -> KLING
                 hostsMatch(h, "douyin.com", "iesdouyin.com") -> DOUYIN
                 hostsMatch(h, "bilibili.com", "b23.tv") -> BILIBILI
                 hostsMatch(h, "kuaishou.com", "chenzhongtech.com") -> KUAISHOU
@@ -109,6 +138,55 @@ enum class Platform(val label: String) {
                 hostsMatch(h, "acfun.cn") -> ACFUN
                 hostsMatch(h, "pearvideo.com") -> LISHIPIN
                 hostsMatch(h, "weishi.qq.com") -> WEISHI
+
+                // ---- 第二批补充平台 ----
+                hostsMatch(h, "pineconemoment.com") -> PINECONE_MOMENT
+                hostsMatch(h, "peiyinxiu.com") -> PEIYINXIU
+                hostsMatch(
+                    h, "e.tb.cn", "m.tb.cn", "tb.cn", "goofish.com",
+                    "market.m.taobao.com", "h5.m.goofish.com", "2.taobao.com"
+                ) -> XIANYU
+                hostsMatch(h, "dewu.com", "poizon.com", "dw4.co") -> DEWU
+                hostsMatch(h, "kwaiying.com") -> KWAIYING
+                hostsMatch(h, "soulsmile.cn") -> SOUL
+
+                // ---- 第三批补充平台 ----
+                hostsMatch(h, "lofter.com") -> LOFTER
+                hostsMatch(h, "hailuoai.com", "hailuoai.video") -> HAILUO
+                hostsMatch(h, "xiaoyunque.jianying.com", "xyq.jianying.com") -> XIAOYUNQUE
+
+                // ---- 第四批补充平台 ----
+                hostsMatch(h, "mp.weixin.qq.com") -> WECHAT_MP
+                hostsMatch(
+                    h, "channels.weixin.qq.com", "weixin.qq.com", "finder.video.qq.com"
+                ) -> WECHAT_CHANNELS
+
+                // ---- 第五批补充平台 ----
+                hostsMatch(
+                    h, "fqnovel.com", "novelquickapp.com", "zlink.fqnovel.com",
+                    "qznovel.com", "changdunovel.com", "kylin.hainanyuyue.com",
+                    "hainanyuyue.com"
+                ) -> FANQIE
+                hostsMatch(
+                    h, "lv.ulikecam.com", "www.capcut.cn", "capcut.cn", "www.capcut.com", "capcut.com"
+                ) -> JIANYING
+                hostsMatch(h, "pd.qq.com") -> TENCENT_CHANNEL
+                hostsMatch(h, "yb.tencent.com", "yuanbao.tencent.com") -> YUANBAO
+                hostsMatch(h, "doubao.com") -> DOUBAO
+                hostsMatch(
+                    h, "jimeng.jianying.com", "jimeng.ai", "aiseet.atry.com"
+                ) -> JIMENG
+                hostsMatch(
+                    h, "qianwen.com", "qianwen.aliyun.com", "tongyi.aliyun.com",
+                    "qianwen.my.cn", "pages.tongyi.com", "tongyi.com"
+                ) -> QIANWEN
+                hostsMatch(h, "quark.cn", "act.quark.cn") -> QUARK_AI
+                hostsMatch(
+                    h, "yangkeduo.com", "pinduoduo.com"
+                ) -> PINDUODUO
+                hostsMatch(h, "butterflyai.cn") -> BUTTERFLYAI
+                hostsMatch(h, "cctv.com", "cctv.cn", "cctvnews.cctv.com", "content-static.cctvnews.cctv.com") -> CCTV
+                hostsMatch(h, "yspapp.cn", "yangshipin.cn") -> YANG_SHIPIN
 
                 // ---- 音乐/音频平台 ----
                 hostsMatch(h, "y.qq.com") -> QQ_MUSIC
