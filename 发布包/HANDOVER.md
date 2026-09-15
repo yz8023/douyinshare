@@ -1,9 +1,9 @@
 # HANDOVER.md — dyparse 项目交接文档
 
 > 本交接包生成时间：2026-09-15
-> 交接包还原点 tag：`v4.10`（已推送 GitHub）
+> 交接包还原点 tag：`v4.11`（已推送 GitHub）
 > 远程仓库：https://github.com/yz8023/douyinshare
-> 交接源码 commit：`3cc3db2`（tag `v4.10` 指向同一 commit）
+> 交接源码 commit：`2b1e217`（tag `v4.11` 指向同一 commit）
 
 ---
 
@@ -18,8 +18,8 @@
 | minSdk / targetSdk / compileSdk | 24 / 34 / 36 |
 | 包名 / 应用名 | `Forinxy.jiexi` / `dyparse` |
 | ABI | 仅 `arm64-v8a`（`app/build.gradle.kts` abiFilters） |
-| 版本 | versionCode 50 / versionName 4.10 |
-| 当前 commit | `3cc3db2` |
+| 版本 | versionCode 51 / versionName 4.11 |
+| 当前 commit | `2b1e217` |
 
 ## 2. 开发环境
 
@@ -85,10 +85,10 @@ cp local.properties.example local.properties
 
 ## 6. 开发进度
 
-- **已完成**：多画质显示与直链下载、作者批量解析、剪贴板监听与历史页、作者主页引导、图集/实况解析与保存配对、内置解析服务器、批量分类筛选（全部/视频/图集/实况）、图集整本下载、画质多档兜底（原画质/最高画质/1080p~360p）、403 修复（AnonymousSessionStore 兜底 + cookie 预热链路 + flat_images 支持）、多平台解析（48 个平台全部内置本地，抖音存量行为不变）、悬浮球保活（FloatingBallService/View/Preferences + 剪贴板监听 ACTION_POLL_NOW）、多链接批量解析（主页粘贴整段多链接文本自动拆分逐条解析并写历史）、登录 Cookie 管理（复制/导出/导入，支持登录态受限内容如抖音限时日常）。
+- **已完成**：多画质显示与直链下载、作者批量解析、剪贴板监听与历史页、作者主页引导、图集/实况解析与保存配对、内置解析服务器、批量分类筛选（全部/视频/图集/实况）、图集整本下载、画质多档兜底（原画质/最高画质/1080p~360p）、403 修复（AnonymousSessionStore 兜底 + cookie 预热链路 + flat_images 支持）、多平台解析（48 个平台全部内置本地，抖音存量行为不变）、悬浮球保活（FloatingBallService/View/Preferences + 剪贴板监听 ACTION_POLL_NOW）、多链接批量解析（主页粘贴整段多链接文本自动拆分逐条解析并写历史）、登录 Cookie 管理（复制/导出/导入，支持登录态受限内容如抖音限时日常）、抖音 detail API 兜底（分享页被过滤的限时日常/story 内容回退走 a_bogus 签名 detail API，配合登录 Cookie 解析）。
 - **进行中**：无。
 - **已搁置**：`server/config.php`（本机未配置，用的是 example 占位，部署在自己服务器时才需要真实值）。
-- **最近可运行 commit**：`3cc3db2`（tag `v4.10`）。
+- **最近可运行 commit**：`2b1e217`（tag `v4.11`）。
 
 ## 7. 待开发内容
 
@@ -106,7 +106,7 @@ cp local.properties.example local.properties
 - **解析管线**：
   - `ParserViewModel.kt`（核心 ViewModel；`saveMedia`、`buildGallerySaveTasks`、`saveBatchMedia`、画质优先级 & hooks，Line 1600-2000 区域）。
   - `LocalParseEngine.kt`（本地解析引擎；`buildQualityList` 多档兜底，Line 183）。
-  - `BuiltInParser.kt`（内置解析；`appendFallbackQuality` 多档兜底 Line 637、`buildOriginalPlayEndpointUrl` Line 880）。
+  - `BuiltInParser.kt`（内置解析；`appendFallbackQuality` 多档兜底 Line 637、`buildOriginalPlayEndpointUrl` Line 880、`fetchDetailItem` detail API 兜底）。
   - `DouyinAuthorWebApiBridge.kt` / `AuthorBatchManager.kt`（作者批量解析、detail API Line 261 区域）。
   - `DouyinGalleryMediaResolver.kt`（图集/实况识别：`collectGalleryMedia` 支持 `flat_images`+`flat_live_photos` 平铺结构）。
   - `ServerApiClient.kt` / `ServerAuthorClient.kt`（外部 PHP 服务端客户端，HMAC 签名）。
