@@ -20,7 +20,21 @@ internal class MultiPlatformParser(context: Context) : MediaParser {
         PiPiXiaParser(http),
         PiPiGaoXiaoParser(http),
         NeteaseMusicParser(http),
-        QiShuiMusicParser(http)
+        QiShuiMusicParser(http),
+        XiguaParser(http),
+        HaokanParser(http),
+        ZhihuParser(http),
+        HuyaParser(http),
+        LvzhouParser(http),
+        MeipaiParser(http),
+        QuanminkgeParser(http),
+        XinpianchangParser(http),
+        ZuiyouParser(http),
+        QQMusicParser(http),
+        KugouMusicParser(http),
+        AcfunParser(http),
+        WeishiParser(http),
+        LishipinParser(http)
     )
 
     private val byPlatform: Map<Platform, PlatformParser> = indexByPlatform(parsers)

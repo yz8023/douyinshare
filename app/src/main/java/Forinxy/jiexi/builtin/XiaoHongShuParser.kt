@@ -43,6 +43,7 @@ internal class XiaoHongShuParser(private val http: PlatformHttp) : PlatformParse
         val noteId: String = "",
         val xsecToken: String? = null,
         val fetchUrl: String = "",
+        val isAppShare: Boolean = false,
         val error: String? = null
     )
 
@@ -73,22 +74,46 @@ internal class XiaoHongShuParser(private val http: PlatformHttp) : PlatformParse
         if (profilePattern.containsMatchIn(url)) {
             return Resolved(error = "暂不支持解析小红书用户主页，请提供笔记分享链接")
         }
-        val matcher = noteIdPattern.find(url)
+        val decoded = decodeRedirectPath(url)
+        val target = decoded ?: url
+        val matcher = noteIdPattern.find(target)
         val noteId = matcher?.groupValues?.get(1).orEmpty()
         if (noteId.isBlank()) {
             return Resolved(error = "未能从链接中解析出小红书笔记 ID，请确认链接有效")
         }
-        val token = queryParam(url, "xsec_token")
+        val token = queryParam(target, "xsec_token")
+        val isAppShare = queryParam(target, "app_platform") != null ||
+            queryParam(target, "xsec_source") == "app_share"
         return Resolved(
             noteId = noteId,
             xsecToken = token,
-            fetchUrl = buildNoteUrl(noteId, token)
+            fetchUrl = buildNoteUrl(noteId, target),
+            isAppShare = isAppShare
         )
     }
 
-    private fun buildNoteUrl(noteId: String, xsecToken: String?): String {
-        val base = "https://www.xiaohongshu.com/explore/$noteId"
-        return if (xsecToken.isNullOrBlank()) base else "$base?xsec_token=$xsecToken"
+    /**
+     * 短链经重定向后可能落到 /login?redirectPath=<percent-encoded 真实地址>，
+     * 从该参数还原真实笔记地址；无法还原返回 null。
+     */
+    private fun decodeRedirectPath(url: String): String? {
+        val redirectPath = queryParam(url, "redirectPath") ?: return null
+        return runCatching {
+            java.net.URLDecoder.decode(redirectPath, "UTF-8")
+        }.getOrNull()?.takeIf { it.isNotBlank() }
+    }
+
+    /**
+     * 保留原始路径（discovery/item 或 explore）与来源签名参数，避免缺少
+     * xsec_source/app_platform 被服务端 404 或重定向登录页。
+     */
+    private fun buildNoteUrl(noteId: String, sourceUrl: String): String {
+        val path = if ("/discovery/item/" in sourceUrl) "discovery/item" else "explore"
+        val base = "https://www.xiaohongshu.com/$path/$noteId"
+        val params = PRESERVED_PARAMS.mapNotNull { key ->
+            queryParam(sourceUrl, key)?.takeIf { it.isNotEmpty() }?.let { "$key=$it" }
+        }
+        return if (params.isEmpty()) base else "$base?" + params.joinToString("&")
     }
 
     private fun queryParam(url: String, name: String): String? {
@@ -108,10 +133,13 @@ internal class XiaoHongShuParser(private val http: PlatformHttp) : PlatformParse
 
     private companion object {
         val redirectHeaders = mapOf(
-            "User-Agent" to PlatformHttp.PC_UA,
+            "User-Agent" to PlatformHttp.MOBILE_UA,
             "Referer" to "https://www.xiaohongshu.com/",
             "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
         )
+
+        /** 需完整保留的来源签名参数，缺一都会被服务端风控/404 */
+        val PRESERVED_PARAMS = listOf("xsec_token", "xsec_source", "source", "xhsshare", "app_platform")
 
         const val TAG = "XiaoHongShuParser"
         const val ERR_DELETED = "笔记已被删除或不存在"
@@ -119,8 +147,15 @@ internal class XiaoHongShuParser(private val http: PlatformHttp) : PlatformParse
     }
 
     private fun fetchNote(resolved: Resolved): JsonObject? {
-        for ((index, ua) in listOf(PlatformHttp.PC_UA, PlatformHttp.MOBILE_UA).withIndex()) {
-            val isLast = index == 1
+        // App 分享链（含 app_platform/xsec_source=app_share）只认移动端 UA；
+        // PC 桌面链优先 PC UA。两者都自动回退。
+        val candidateUas = if (resolved.isAppShare) {
+            listOf(PlatformHttp.MOBILE_UA, PlatformHttp.PC_UA)
+        } else {
+            listOf(PlatformHttp.PC_UA, PlatformHttp.MOBILE_UA)
+        }
+        for ((index, ua) in candidateUas.withIndex()) {
+            val isLast = index == candidateUas.size - 1
             val headers = mapOf(
                 "User-Agent" to ua,
                 "Referer" to "https://www.xiaohongshu.com/",

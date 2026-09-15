@@ -75,10 +75,28 @@ internal class WeiboParser(private val http: PlatformHttp) : PlatformParser {
     private fun resolveRealUrl(input: String): String? {
         if (input.isBlank()) return null
         val link = urlInTextPattern.matcher(input).let { if (it.find()) it.group() else null }
-        val raw = link ?: input.trim()
+        val raw = (link ?: input.trim()).trim()
         if (raw.isBlank()) return null
+        // 微博博文可直接由 URL 中的 ID 解析；网页端常重定向到访客系统
+        // (passport.weibo.cn/visitor)，因此能从原始链接取到 ID 时不再发请求。
+        if (extractMid(raw) != null || extractVideoOid(raw) != null) return raw
         val resp = http.get(raw, pcHeaders())
-        return resp?.finalUrl?.takeIf { it.isNotBlank() } ?: raw
+        val finalUrl = resp?.finalUrl?.takeIf { it.isNotBlank() } ?: return raw
+        if (isVisitorUrl(finalUrl)) {
+            decodeEmbeddedUrl(finalUrl)?.let { if (extractMid(it) != null) return it }
+            return raw
+        }
+        return finalUrl
+    }
+
+    private fun isVisitorUrl(url: String): Boolean =
+        "passport.weibo" in url || "/visitor" in url || "visitor.weibo" in url
+
+    /** 从访客系统的 url= 参数还原真实目标地址（percent-encoded）。 */
+    private fun decodeEmbeddedUrl(url: String): String? {
+        val raw = queryParam(url, "url") ?: return null
+        return runCatching { URLDecoder.decode(raw, StandardCharsets.UTF_8.name()) }
+            .getOrNull()?.takeIf { it.isNotBlank() }
     }
 
     private fun pcHeaders(referer: String = "https://weibo.com/"): Map<String, String> {
@@ -335,7 +353,11 @@ internal class WeiboParser(private val http: PlatformHttp) : PlatformParser {
 
     private fun extractTitle(postData: JsonObject, realUrl: String, mid: String?): String {
         postData.asString("title")?.let { return it }
-        postData.asObject("page_info")?.asString("title")?.let { return it }
+        val pageInfo = postData.asObject("page_info")
+        pageInfo?.asString("title")?.let { return it }
+        pageInfo?.asString("content2")?.let { return it }
+        pageInfo?.asString("content1")?.let { return it }
+        pageInfo?.asString("page_title")?.let { return stripHtml(it).trim() }
         postData.asString("longText")?.let { return stripHtml(it).trim() }
         val text = postData.asString("text_raw")
             ?: postData.asString("text")
@@ -392,17 +414,9 @@ internal class WeiboParser(private val http: PlatformHttp) : PlatformParser {
         for (key in listOf("replay_origin_url", "live_origin_hls_url", "live_origin_flv_url")) {
             postData.asString(key)?.let { return withProto(it) }
         }
-        postData.asObject("urls")?.let { urls ->
-            for (entry in urls.entrySet()) {
-                val v = entry.value
-                when {
-                    v.isJsonPrimitive && !v.asString.isBlank() -> return withProto(v.asString)
-                    v.isJsonObject -> {
-                        v.asJsonObject.asString("url")?.let { return withProto(it) }
-                        v.asJsonObject.asString("back_url")?.let { return withProto(it) }
-                    }
-                }
-            }
+        postData.asObject("urls")?.let { urls -> firstPlayUrlFromUrls(urls)?.let { return it } }
+        postData.asObject("page_info")?.asObject("urls")?.let { urls ->
+            firstPlayUrlFromUrls(urls)?.let { return it }
         }
         postData.asString("ff_mp4_hd_url")?.let { return withProto(it) }
 
@@ -434,6 +448,24 @@ internal class WeiboParser(private val http: PlatformHttp) : PlatformParser {
             element.asJsonObject.asObject("play_info")?.asString("url")?.let { return it }
         }
         return null
+    }
+
+    /** 从 urls 映射里取播放地址，优先 720p 清晰度。 */
+    private fun firstPlayUrlFromUrls(urls: JsonObject): String? {
+        var first: String? = null
+        for (entry in urls.entrySet()) {
+            val value = entry.value
+            val candidate = when {
+                value.isJsonPrimitive && !value.asString.isBlank() -> value.asString
+                value.isJsonObject -> value.asJsonObject.asString("url")
+                    ?: value.asJsonObject.asString("back_url")
+                else -> null
+            } ?: continue
+            val url = withProto(candidate)
+            if (first == null) first = url
+            if ("720" in entry.key) return url
+        }
+        return first
     }
 
     private fun extractDuration(postData: JsonObject): Double {

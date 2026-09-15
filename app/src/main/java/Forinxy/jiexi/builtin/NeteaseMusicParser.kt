@@ -78,6 +78,7 @@ internal class NeteaseMusicParser(private val http: PlatformHttp) : PlatformPars
         md.inputUrl = input
         md.resolvedUrl = shareUrl
         md.addQuality("标准", "default", playable, isOriginal = true)
+        md.lyrics.addAll(lyrics)
         return md
     }
 
@@ -108,6 +109,7 @@ internal class NeteaseMusicParser(private val http: PlatformHttp) : PlatformPars
         } else {
             md.type = "image"
         }
+        md.lyrics.addAll(lyrics)
         return md
     }
 
@@ -256,7 +258,33 @@ internal class NeteaseMusicParser(private val http: PlatformHttp) : PlatformPars
             val url = entries.get(0).asJsonObject.asString("url")
             if (validUrl(url)) audioUrl = url
         }
+        parseLyrics(numericId.toString())
         return true
+    }
+
+    /** /api/song/lyric 取 LRC 原文，转换为带时间轴的歌词行。 */
+    private fun parseLyrics(songId: String) {
+        if (lyrics.isNotEmpty()) return
+        val payload = requestJson(
+            "https://music.163.com/api/song/lyric",
+            mapOf("id" to songId, "lv" to "1", "kv" to "1", "tv" to "-1")
+        ) ?: return
+        val lrc = payload.asObject("lrc")?.asString("lyric") ?: return
+        lyrics = parseLrc(lrc)
+    }
+
+    /** 解析 LRC 文本：`[mm:ss.xx]text` / `[mm:ss]text`，仅保留有文本的行。 */
+    private fun parseLrc(text: String): MutableList<LyricLine> {
+        val result = mutableListOf<LyricLine>()
+        text.lineSequence().forEach { rawLine ->
+            val match = LRC_LINE.find(rawLine.trim()) ?: return@forEach
+            val minute = match.groupValues[1].toIntOrNull() ?: return@forEach
+            val second = match.groupValues[2].toDoubleOrNull() ?: return@forEach
+            val content = match.groupValues[3].trim()
+            if (content.isEmpty()) return@forEach
+            result.add(LyricLine(text = content, start = minute * 60 + second))
+        }
+        return result
     }
 
     private fun requestJson(baseUrl: String, params: Map<String, String>): JsonObject? {
@@ -488,6 +516,7 @@ internal class NeteaseMusicParser(private val http: PlatformHttp) : PlatformPars
     private var durationSec: Double = 0.0
     private var images: MutableList<String> = mutableListOf()
     private var galleryItems: MutableList<GalleryItem> = mutableListOf()
+    private var lyrics: MutableList<LyricLine> = mutableListOf()
 
     private fun resetState() {
         title = ""
@@ -500,6 +529,7 @@ internal class NeteaseMusicParser(private val http: PlatformHttp) : PlatformPars
         durationSec = 0.0
         images = mutableListOf()
         galleryItems = mutableListOf()
+        lyrics = mutableListOf()
     }
 
     private companion object {
@@ -543,5 +573,6 @@ internal class NeteaseMusicParser(private val http: PlatformHttp) : PlatformPars
         val HEX_REF = Regex("&#x([0-9a-fA-F]+);")
         val DEC_REF = Regex("&#(\\d+);")
         val VIDEO_EXTS = listOf(".mp4", ".mov", ".m3u8")
+        val LRC_LINE = Regex("""\[(\d{1,3}):(\d{1,2}(?:\.\d{1,3})?)]\s*(.*)""")
     }
 }

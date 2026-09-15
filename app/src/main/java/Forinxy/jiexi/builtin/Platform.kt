@@ -6,8 +6,10 @@ import java.net.URI
  * 支持解析的平台。识别规则以域名匹配为主，作品 ID 规则为辅。
  *
  * 识别顺序很重要：汽水音乐的 qishui.douyin.com / music.douyin.com 属于 douyin
- * 子域，必须先于抖音判定；短视频短链（b23.tv / t.cn / xhslink.com 等）按域名直接归类，
- * 具体作品 ID 由各平台解析器跟随重定向后提取。
+ * 子域，必须先于抖音判定；绿洲 oasis.weibo.cn 属于 weibo.cn 子域，必须先于微博；
+ * 可灵AI klingai-share.kuaishou.com 属于快手子域，必须先于快手。短视频短链
+ * （b23.tv / t.cn / xhslink.com 等）按域名直接归类，具体作品 ID 由各平台解析器
+ * 跟随重定向后提取。
  */
 enum class Platform(val label: String) {
     DOUYIN("抖音"),
@@ -19,10 +21,26 @@ enum class Platform(val label: String) {
     PIPIXIA("皮皮虾"),
     PIPIGAOXIAO("皮皮搞笑"),
     NETEASE_MUSIC("网易云音乐"),
-    QISHUI_MUSIC("汽水音乐");
+    QISHUI_MUSIC("汽水音乐"),
+    // ---- media-parser 对齐补充的平台（本轮已实现）----
+    XIGUA("西瓜视频"),
+    HAOKAN("好看视频"),
+    ZHIHU("知乎"),
+    HUYA("虎牙"),
+    LVZHOU("绿洲"),
+    MEIPAI("美拍"),
+    QUANMIN_KGE("全民K歌"),
+    XINPIANCHANG("新片场"),
+    ZUIYOU("最右"),
+    QQ_MUSIC("QQ音乐"),
+    KUGOU_MUSIC("酷狗音乐"),
+    ACFUN("AcFun"),
+    WEISHI("微视"),
+    LISHIPIN("梨视频");
 
     val isMusic: Boolean
-        get() = this == NETEASE_MUSIC || this == QISHUI_MUSIC
+        get() = this == NETEASE_MUSIC || this == QISHUI_MUSIC ||
+            this == QQ_MUSIC || this == KUGOU_MUSIC
 
     companion object {
         /** 分享文案里抠出的 URL */
@@ -64,16 +82,39 @@ enum class Platform(val label: String) {
         private fun matchHost(host: String): Platform? {
             val h = host.lowercase()
             return when {
+                // ---- 已有平台（含子域特例优先）----
                 h == "qishui.douyin.com" || h == "music.douyin.com" -> QISHUI_MUSIC
                 hostsMatch(h, "douyin.com", "iesdouyin.com") -> DOUYIN
                 hostsMatch(h, "bilibili.com", "b23.tv") -> BILIBILI
                 hostsMatch(h, "kuaishou.com", "chenzhongtech.com") -> KUAISHOU
                 hostsMatch(h, "xiaohongshu.com", "xhslink.com", "xhslink.cn") -> XIAOHONGSHU
+                hostsMatch(h, "oasis.weibo.cn") -> LVZHOU
                 hostsMatch(h, "weibo.com", "weibo.cn", "t.cn") -> WEIBO
-                h.endsWith("toutiao.com") -> TOUTIAO
+                hostsMatch(h, "toutiao.com", "snssdk.com") -> TOUTIAO
                 hostsMatch(h, "pipix.com") -> PIPIXIA
                 hostsMatch(h, "pipigx.com", "ippzone.com") -> PIPIGAOXIAO
-                hostsMatch(h, "music.163.com") -> NETEASE_MUSIC
+                hostsMatch(h, "music.163.com", "163cn.tv") -> NETEASE_MUSIC
+
+                // ---- 视频/社区平台 ----
+                hostsMatch(h, "ixigua.com") -> XIGUA
+                hostsMatch(
+                    h, "haokan.baidu.com", "haokan.hao123.com", "mr.baidu.com",
+                    "sv.baidu.com", "baijiahao.baidu.com"
+                ) -> HAOKAN
+                hostsMatch(h, "zhihu.com") -> ZHIHU
+                hostsMatch(h, "huya.com", "hy.fan") -> HUYA
+                hostsMatch(h, "meipai.com") -> MEIPAI
+                hostsMatch(h, "xinpianchang.com") -> XINPIANCHANG
+                hostsMatch(h, "izuiyou.com", "xiaochuankeji.cn") -> ZUIYOU
+                hostsMatch(h, "acfun.cn") -> ACFUN
+                hostsMatch(h, "pearvideo.com") -> LISHIPIN
+                hostsMatch(h, "weishi.qq.com") -> WEISHI
+
+                // ---- 音乐/音频平台 ----
+                hostsMatch(h, "y.qq.com") -> QQ_MUSIC
+                hostsMatch(h, "kg.qq.com", "kg2.qq.com", "kg3.qq.com", "static-play.kg.qq.com") -> QUANMIN_KGE
+                hostsMatch(h, "kugou.com") -> KUGOU_MUSIC
+
                 else -> null
             }
         }

@@ -196,4 +196,165 @@ class PlatformDetectTest {
         // 含 douyin 但属其他平台的域名仍需精确识别
         assertEquals(Platform.QISHUI_MUSIC, Platform.detect("https://qishui.douyin.com/s/x/"))
     }
+
+    @Test
+    fun xigua_video() {
+        assertEquals(
+            Platform.XIGUA,
+            Platform.detect("https://www.ixigua.com/7234567890123456789")
+        )
+    }
+
+    @Test
+    fun xigua_mobile_video() {
+        assertEquals(
+            Platform.XIGUA,
+            Platform.detect("https://m.ixigua.com/video/7234567890123456789/")
+        )
+    }
+
+    @Test
+    fun haokan_video() {
+        assertEquals(
+            Platform.HAOKAN,
+            Platform.detect("https://haokan.baidu.com/v?vid=1234567890")
+        )
+    }
+
+    @Test
+    fun haokan_hao123() {
+        assertEquals(
+            Platform.HAOKAN,
+            Platform.detect("https://haokan.hao123.com/abc")
+        )
+    }
+
+    @Test
+    fun zhihu_answer() {
+        assertEquals(
+            Platform.ZHIHU,
+            Platform.detect("https://www.zhihu.com/question/123456789/answer/987654321")
+        )
+    }
+
+    @Test
+    fun zhihu_zvideo() {
+        assertEquals(
+            Platform.ZHIHU,
+            Platform.detect("https://www.zhihu.com/zvideo/1234567890123456789")
+        )
+    }
+
+    @Test
+    fun zhihu_article() {
+        assertEquals(
+            Platform.ZHIHU,
+            Platform.detect("https://zhuanlan.zhihu.com/p/123456789")
+        )
+    }
+
+    @Test
+    fun huya_moment() {
+        assertEquals(
+            Platform.HUYA,
+            Platform.detect("https://www.huya.com/moment/1234567890")
+        )
+    }
+
+    @Test
+    fun lvzhou_precedes_weibo() {
+        // 绿洲域名是 weibo.cn 子域，必须优先识别为绿洲
+        assertEquals(
+            Platform.LVZHOU,
+            Platform.detect("https://oasis.weibo.cn/v1/h5/share?sid=123456")
+        )
+    }
+
+    @Test
+    fun meipai_media() {
+        assertEquals(
+            Platform.MEIPAI,
+            Platform.detect("https://www.meipai.com/media/123456789012345")
+        )
+    }
+
+    @Test
+    fun quanminkge_share() {
+        assertEquals(
+            Platform.QUANMIN_KGE,
+            Platform.detect("https://kg.qq.com/node/play?s=abc123")
+        )
+    }
+
+    @Test
+    fun xinpianchang_article() {
+        assertEquals(
+            Platform.XINPIANCHANG,
+            Platform.detect("https://www.xinpianchang.com/a12345678")
+        )
+    }
+
+    @Test
+    fun zuiyou_share() {
+        assertEquals(
+            Platform.ZUIYOU,
+            Platform.detect("https://share.xiaochuankeji.cn/postDetail?pid=123456")
+        )
+    }
+
+    @Test
+    fun qqmusic_song() {
+        assertEquals(
+            Platform.QQ_MUSIC,
+            Platform.detect("https://y.qq.com/n/ryqq/songDetail/004Z8Ihr0JIu5s")
+        )
+    }
+
+    @Test
+    fun qqmusic_mv() {
+        assertEquals(
+            Platform.QQ_MUSIC,
+            Platform.detect("https://y.qq.com/n/ryqq/mvDetail/0020GSPf3gZGq0")
+        )
+    }
+
+    @Test
+    fun kugou_mv() {
+        assertEquals(
+            Platform.KUGOU_MUSIC,
+            Platform.detect("https://www.kugou.com/mvweb/html/mv_1234567890abcdef.html")
+        )
+    }
+
+    @Test
+    fun kugou_song() {
+        assertEquals(
+            Platform.KUGOU_MUSIC,
+            Platform.detect("https://m.kugou.com/share/song/abc123.html")
+        )
+    }
+
+    @Test
+    fun acfun_video() {
+        assertEquals(
+            Platform.ACFUN,
+            Platform.detect("https://www.acfun.cn/v/ac12345678")
+        )
+    }
+
+    @Test
+    fun weishi_video() {
+        assertEquals(
+            Platform.WEISHI,
+            Platform.detect("https://weishi.qq.com/abc123")
+        )
+    }
+
+    @Test
+    fun lishipin_video() {
+        assertEquals(
+            Platform.LISHIPIN,
+            Platform.detect("https://www.pearvideo.com/video_1234567890")
+        )
+    }
 }
