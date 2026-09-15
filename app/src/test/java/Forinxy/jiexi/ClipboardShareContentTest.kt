@@ -26,6 +26,27 @@ class ClipboardShareContentTest {
     }
 
     @Test
+    fun reported_failing_platforms_recognized() {
+        // 用户反馈解析失败的平台链接，剪贴板识别须覆盖
+        assertTrue(ClipboardShareContent.isDouyinShare("https://www.pearvideo.com/video_1805408"))
+        assertTrue(ClipboardShareContent.isDouyinShare("https://video.weishi.qq.com/5D41bben"))
+        assertTrue(ClipboardShareContent.isDouyinShare("https://c6.y.qq.com/base/fcgi-bin/u?__=K3G2Po2Y91ZH"))
+        assertTrue(ClipboardShareContent.isDouyinShare("https://www.zhihu.com/pin/2066168388699807826"))
+        assertTrue(ClipboardShareContent.isDouyinShare("https://163cn.tv/bgriucOS"))
+        // 分享文案 + 短链兜底
+        assertTrue(
+            ClipboardShareContent.isDouyinShare(
+                "分享我的梨视频作品：https://www.pearvideo.com/video_1807314 觉得不错就点个赞吧"
+            )
+        )
+        assertTrue(
+            ClipboardShareContent.isDouyinShare(
+                "【QQ音乐】https://c6.y.qq.com/base/fcgi-bin/u?__=K3G2Po2Y91ZH 一起来听~"
+            )
+        )
+    }
+
+    @Test
     fun unsupported_share_not_recognized() {
         assertFalse(ClipboardShareContent.isDouyinShare("https://www.youtube.com/watch?v=xxx"))
         assertFalse(ClipboardShareContent.isDouyinShare("hello world"))
@@ -44,6 +65,18 @@ class ClipboardShareContentTest {
             ClipboardShareContent.extractParseInput("看看这个笔记 https://www.xiaohongshu.com/explore/641d1a000000000013012345")
         )
         assertEquals("7234567890123456789", ClipboardShareContent.extractParseInput("7234567890123456789"))
+    }
+
+    @Test
+    fun extract_parse_input_from_reported_platforms() {
+        assertEquals(
+            "https://c6.y.qq.com/base/fcgi-bin/u?__=K3G2Po2Y91ZH",
+            ClipboardShareContent.extractParseInput("【QQ音乐】https://c6.y.qq.com/base/fcgi-bin/u?__=K3G2Po2Y91ZH 一起来听~")
+        )
+        assertEquals(
+            "https://163cn.tv/bgriucOS",
+            ClipboardShareContent.extractParseInput("分享澪恩Seiwen的单曲: https://163cn.tv/bgriucOS (来自@网易云音乐)")
+        )
     }
 
     @Test

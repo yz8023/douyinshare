@@ -303,6 +303,15 @@ internal class QQMusicParser(private val http: PlatformHttp) : PlatformParser {
         return md
     }
 
+    /** 依次取第一个非空 JsonArray（参考实现 `url or freeflow_url or comm_url or []`） */
+    private fun firstNonEmptyArray(item: JsonObject, vararg keys: String): JsonArray? {
+        for (key in keys) {
+            val arr = item.jArr(key)
+            if (arr != null && arr.size() > 0) return arr
+        }
+        return null
+    }
+
     private fun extractStreams(streamData: JsonObject): List<String> {
         val ranked = mutableListOf<Pair<Long, String>>()
         for (kind in listOf("mp4", "hls")) {
@@ -312,7 +321,8 @@ internal class QQMusicParser(private val http: PlatformHttp) : PlatformParser {
                 val item = element.asJsonObject
                 val code = item.jLong("code")
                 if (code != null && code != 0L) continue
-                val candidates = item.jArr("url") ?: item.jArr("freeflow_url") ?: item.jArr("comm_url")
+                // 参考实现用 or 语义：url/freeflow_url/comm_url 依次取第一个非空数组
+                val candidates = firstNonEmptyArray(item, "url", "freeflow_url", "comm_url")
                 var url: String? = null
                 if (candidates != null) {
                     for (c in candidates) {

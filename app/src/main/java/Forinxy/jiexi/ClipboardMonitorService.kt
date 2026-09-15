@@ -75,6 +75,9 @@ class ClipboardMonitorService : Service() {
 
     private lateinit var clipboardManager: ClipboardManager
 
+    /** 前台时监听剪贴板变更，即时触发解析（相比 3s 轮询更灵敏） */
+    private var clipboardListener: ClipboardManager.OnPrimaryClipChangedListener? = null
+
     /** 完整解析结果序列化（卡片详情复用） */
     private val gson = Gson()
 
@@ -88,6 +91,7 @@ class ClipboardMonitorService : Service() {
         super.onCreate()
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         createNotificationChannel()
+        registerClipboardListener()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -102,9 +106,23 @@ class ClipboardMonitorService : Service() {
         return START_STICKY
     }
 
+    /** 注册剪贴板变更监听：应用在前台时复制内容可被即时捕获，不受 3s 轮询间隔限制 */
+    private fun registerClipboardListener() {
+        if (clipboardListener != null) return
+        val listener = ClipboardManager.OnPrimaryClipChangedListener {
+            if (running) {
+                scope.launch { pollClipboardOnce() }
+            }
+        }
+        clipboardListener = listener
+        runCatching { clipboardManager.addPrimaryClipChangedListener(listener) }
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        clipboardListener?.let { runCatching { clipboardManager.removePrimaryClipChangedListener(it) } }
+        clipboardListener = null
         running = false
         monitoring = false
         scope.cancel()

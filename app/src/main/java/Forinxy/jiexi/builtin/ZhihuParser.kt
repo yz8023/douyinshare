@@ -1,6 +1,7 @@
 package Forinxy.jiexi.builtin
 
 import android.util.Log
+import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import java.util.regex.Pattern
 
@@ -59,7 +60,7 @@ internal class ZhihuParser(private val http: PlatformHttp) : PlatformParser {
             ?: data.jStr("image_url")?.let { firstUrl(it) }
             ?: imagesFromContent(data).firstOrNull()
 
-        val play = playlistUrl(data.jObj("playlist")) ?: playlistUrl(pinVideo(data).jObj("playlist"))
+        val play = playlistUrl(data.jObj("playlist")) ?: playlistUrl(pinVideo(data).get("playlist"))
 
         if (play != null) {
             md.type = "video"
@@ -118,13 +119,17 @@ internal class ZhihuParser(private val http: PlatformHttp) : PlatformParser {
         return JsonObject()
     }
 
-    /** 播放列表：字典（各画质）或数组，按 bitrate/width*height 降序取第一个 */
-    private fun playlistUrl(playlist: JsonObject?): String? {
-        if (playlist == null) return null
+    /** 播放列表：字典（各画质）或数组（pin 的 playlist 为 [{format,url}]），按 bitrate/width*height 降序取第一个 */
+    private fun playlistUrl(playlist: JsonElement?): String? {
+        if (playlist == null || !(playlist.isJsonObject || playlist.isJsonArray)) return null
         val candidates = mutableListOf<JsonObject>()
         if (playlist.isJsonObject) {
-            for (element in playlist.entrySet()) {
+            for (element in playlist.asJsonObject.entrySet()) {
                 if (element.value.isJsonObject) candidates.add(element.value.asJsonObject)
+            }
+        } else {
+            for (element in playlist.asJsonArray) {
+                if (element.isJsonObject) candidates.add(element.asJsonObject)
             }
         }
         candidates.sortWith(compareByDescending<JsonObject> { it.jLong("bitrate") ?: 0L }

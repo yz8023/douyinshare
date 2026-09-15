@@ -45,7 +45,8 @@ internal class LishipinParser(private val http: PlatformHttp) : PlatformParser {
         val data = parseJsonObj(apiResp.body) ?: return failResponse("视频不存在或已删除")
         val videoInfo = data.jObj("videoInfo") ?: return failResponse("视频不存在或已删除")
 
-        val srcUrl = videoInfo.jStr("srcUrl")
+        // 真实直链位于 videoInfo.videos.srcUrl（videoInfo.srcUrl 不存在，参考实现同层取 videos.srcUrl）
+        val srcUrl = videoInfo.jObj("videos")?.jStr("srcUrl")
             ?: return failResponse("无法获取播放地址")
         val play = rewriteSrcUrl(srcUrl, videoId)
 

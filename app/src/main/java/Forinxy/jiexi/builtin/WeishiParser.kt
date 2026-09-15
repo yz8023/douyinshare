@@ -18,7 +18,7 @@ internal class WeishiParser(private val http: PlatformHttp) : PlatformParser {
     )
 
     private val initStatePattern =
-        Pattern.compile("window\\.Vise\\.initState\\s*=\\s*(\\{.*?\\};)", Pattern.DOTALL)
+        Pattern.compile("window\\.Vise\\.initState\\s*=\\s*(\\{.*\\};)", Pattern.DOTALL)
 
     override fun parse(
         input: String,
@@ -42,7 +42,7 @@ internal class WeishiParser(private val http: PlatformHttp) : PlatformParser {
         val m = initStatePattern.matcher(resp.body)
         if (!m.find()) return failResponse("无法解析微视页面数据")
 
-        val state = parseJsonObj(m.group(1)) ?: return failResponse("无法解析微视页面数据")
+        val state = parseJsonObj(m.group(1)?.trimEnd(';')) ?: return failResponse("无法解析微视页面数据")
         val feed = firstFeed(state) ?: return failResponse("视频不存在或已删除")
 
         val videoUrl = feed.jStr("videoUrl")?.replace("\\u002F", "/")

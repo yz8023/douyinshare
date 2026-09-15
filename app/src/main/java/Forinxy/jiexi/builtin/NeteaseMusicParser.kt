@@ -36,7 +36,16 @@ internal class NeteaseMusicParser(private val http: PlatformHttp) : PlatformPars
         resetState()
         val url = extractUrl(input)
             ?: throw ParseException("无法识别网易云音乐链接")
-        val routing = detectMedia(url)
+        var routing = detectMedia(url)
+        var realUrl = url
+        // 163cn.tv 等短链 / 分享页需跟随重定向后按最终地址识别
+        if (routing.type == null) {
+            val resolved = resolveRedirect(url)
+            if (resolved != null) {
+                realUrl = resolved
+                routing = detectMedia(resolved)
+            }
+        }
         val type = routing.type
             ?: throw ParseException("无法识别网易云音乐链接")
         val id = routing.id
@@ -44,22 +53,30 @@ internal class NeteaseMusicParser(private val http: PlatformHttp) : PlatformPars
         return when (type) {
             "mv" -> {
                 require(parseMv(id)) { "MV不存在或已删除" }
-                buildMediaData(url, input)
+                buildMediaData(realUrl, input)
             }
             "mlog" -> {
-                require(parseMlog(url, id)) { "音乐动态不存在或已删除" }
-                buildMediaData(url, input)
+                require(parseMlog(realUrl, id)) { "音乐动态不存在或已删除" }
+                buildMediaData(realUrl, input)
             }
             "event" -> {
-                require(parseEvent(url, id)) { "动态不存在或已删除" }
-                buildMediaData(url, input)
+                require(parseEvent(realUrl, id)) { "动态不存在或已删除" }
+                buildMediaData(realUrl, input)
             }
             else -> {
                 require(id != null) { "歌曲不存在或已删除" }
                 require(parseSong(id)) { "歌曲不存在或已删除" }
-                buildSongData(url, input)
+                buildSongData(realUrl, input)
             }
         }
+    }
+
+    /** 跟随重定向拿到最终落地页地址（短链解决），失败返回 null */
+    private fun resolveRedirect(url: String): String? {
+        val resp = http.get(url, SHARE_HEADERS) ?: return null
+        if (resp.body.isNullOrBlank() || resp.statusCode != 200) return null
+        val finalUrl = resp.finalUrl.takeIf { it.isNotBlank() }
+        return finalUrl?.takeIf { runCatching { it != url }.getOrDefault(false) } ?: url
     }
 
     private fun buildSongData(shareUrl: String, input: String): MediaData {
