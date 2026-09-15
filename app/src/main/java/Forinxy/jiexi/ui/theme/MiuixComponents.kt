@@ -68,6 +68,8 @@ fun MiuixTextField(
     supportingText: @Composable (() -> Unit)? = null,
     enabled: Boolean = true,
     singleLine: Boolean = true,
+    minLines: Int = 1,
+    maxLines: Int = if (singleLine) 1 else Int.MAX_VALUE,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     visualTransformation: VisualTransformation = VisualTransformation.None,
     trailingIcon: @Composable (() -> Unit)? = null
@@ -80,6 +82,8 @@ fun MiuixTextField(
         supportingText = supportingText,
         enabled = enabled,
         singleLine = singleLine,
+        minLines = minLines,
+        maxLines = maxLines,
         keyboardOptions = keyboardOptions,
         visualTransformation = visualTransformation,
         trailingIcon = trailingIcon,

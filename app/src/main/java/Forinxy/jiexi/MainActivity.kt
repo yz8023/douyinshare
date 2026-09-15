@@ -76,6 +76,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -346,11 +347,20 @@ fun MainScreen() {
         }
     }
 
-    // 回到前台时立即补读一次剪贴板：悬浮球点按后 App 恢复前台即可解析刚复制的内容
+    // 回到前台时立即补读一次剪贴板：悬浮球点按后 App 恢复前台即可解析刚复制的内容。
+    // 同时补启动悬浮球：用户从「显示在其他应用上层」系统授权页返回、或服务被杀后重建时，
+    // 初始 LaunchedEffect(Unit) 已经跑过，这里兜底把已开启且已授权但未运行的服务拉起。
     LaunchedEffect(isResumed) {
-        if (isResumed && ClipboardMonitorPreferences.isEnabled(appContext)) {
-            delay(400)
+        if (!isResumed) return@LaunchedEffect
+        delay(400)
+        if (ClipboardMonitorPreferences.isEnabled(appContext)) {
             ClipboardMonitorService.requestPollNow(appContext)
+        }
+        if (FloatingWindowPreferences.isEnabled(appContext) &&
+            FloatingWindowPreferences.canDrawOverlays(appContext) &&
+            !FloatingBallService.running
+        ) {
+            FloatingBallService.start(appContext)
         }
     }
 
@@ -716,6 +726,7 @@ fun ParserUI(
 ) {
     var text by rememberSaveable { mutableStateOf("") }
     val parseResult by viewModel.parseResult
+    val multiLinkParseState by viewModel.multiLinkParseState
     val saveState by viewModel.saveState
     val videoQualityOptions by viewModel.videoQualityOptions
     val context = LocalContext.current
@@ -742,7 +753,8 @@ fun ParserUI(
     }
 
     val isParsing = parseResult is ParseResult.Loading
-    val isBusy = isParsing || saveState.isSaving
+    val isMultiLinkParsing = multiLinkParseState is MultiLinkParseState.Running
+    val isBusy = isParsing || isMultiLinkParsing || saveState.isSaving
     val galleryItems = (parseResult as? ParseResult.Success)?.galleryItems.orEmpty()
 
     LaunchedEffect(galleryItems) {
@@ -775,9 +787,11 @@ fun ParserUI(
                         MiuixTextField(
                             value = text,
                             onValueChange = { text = it },
-                            label = { Text("请输入抖音分享链接或作品 ID") },
+                            label = { Text("请输入抖音分享链接或作品 ID（可一次粘贴多条）") },
                             modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
+                            singleLine = false,
+                            minLines = 1,
+                            maxLines = 6,
                             trailingIcon = {
                                 IconButton(
                                     onClick = {
@@ -807,7 +821,13 @@ fun ParserUI(
                                 onClick = { viewModel.parse(text) },
                                 enabled = text.isNotBlank() && !isBusy
                             ) {
-                                Text(if (isParsing) "解析中..." else "解析")
+                                Text(
+                                    when {
+                                        isParsing -> "解析中..."
+                                        isMultiLinkParsing -> "批量解析中..."
+                                        else -> "解析"
+                                    }
+                                )
                             }
                         }
                     }
@@ -994,6 +1014,68 @@ fun ParserUI(
                         Text(result.msg, color = MaterialTheme.colorScheme.error)
                     }
                 }
+            }
+
+            // 多链接批量解析：进度与最终结果
+            when (val state = multiLinkParseState) {
+                is MultiLinkParseState.Running -> {
+                    item(span = { GridItemSpan(3) }) {
+                        MiuixSurface(modifier = Modifier.fillMaxWidth()) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = "批量解析 ${state.current}/${state.total}",
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                LinearProgressIndicator(
+                                    progress = {
+                                        if (state.total > 0) state.current.toFloat() / state.total else 0f
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Text(
+                                    text = "成功 ${state.succeeded} · 失败 ${state.failed}" +
+                                        (state.lastTitle?.let { " · ${it.take(18)}" } ?: ""),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+                is MultiLinkParseState.Finished -> {
+                    item(span = { GridItemSpan(3) }) {
+                        MiuixSurface(modifier = Modifier.fillMaxWidth()) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                horizontalAlignment = Alignment.Start
+                            ) {
+                                Text(
+                                    text = "批量解析完成：成功 ${state.succeeded} / ${state.total}" +
+                                        (if (state.failed > 0) "，失败 ${state.failed}" else ""),
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = "成功结果已写入解析历史",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+                is MultiLinkParseState.Error -> {
+                    item(span = { GridItemSpan(3) }) {
+                        Text(state.msg, color = MaterialTheme.colorScheme.error)
+                    }
+                }
+                MultiLinkParseState.Idle -> Unit
             }
         }
 

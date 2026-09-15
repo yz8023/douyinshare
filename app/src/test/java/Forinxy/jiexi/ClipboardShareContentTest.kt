@@ -84,4 +84,59 @@ class ClipboardShareContentTest {
         assertNull(ClipboardShareContent.extractParseInput("没有任何链接"))
         assertNull(ClipboardShareContent.extractParseInput(""))
     }
+
+    @Test
+    fun extract_all_parse_inputs_returns_multiple_links_in_order() {
+        val text = "第一个作品 https://v.douyin.com/abcdef/ 第二个 https://www.bilibili.com/video/BV1xx411c7mD/ 第三个 https://v.kuaishou.com/abc123"
+        val result = ClipboardShareContent.extractAllParseInputs(text)
+        assertEquals(
+            listOf(
+                "https://v.douyin.com/abcdef/",
+                "https://www.bilibili.com/video/BV1xx411c7mD/",
+                "https://v.kuaishou.com/abc123"
+            ),
+            result
+        )
+    }
+
+    @Test
+    fun extract_all_parse_inputs_deduplicates_repeated_links() {
+        val text = "分享 https://v.douyin.com/abcdef/ 再看一遍 https://v.douyin.com/abcdef/"
+        assertEquals(
+            listOf("https://v.douyin.com/abcdef/"),
+            ClipboardShareContent.extractAllParseInputs(text)
+        )
+    }
+
+    @Test
+    fun extract_all_parse_inputs_mixed_bare_id_and_bv() {
+        val text = "复制这条信息 7234567890123456789 打开抖音，还有 BV1xx411c7mD 一起看看"
+        assertEquals(
+            listOf("7234567890123456789", "BV1xx411c7mD"),
+            ClipboardShareContent.extractAllParseInputs(text)
+        )
+    }
+
+    @Test
+    fun extract_all_parse_inputs_skips_bv_inside_url() {
+        val text = "看看 https://www.bilibili.com/video/BV1xx411c7mD/ 这个视频"
+        assertEquals(
+            listOf("https://www.bilibili.com/video/BV1xx411c7mD/"),
+            ClipboardShareContent.extractAllParseInputs(text)
+        )
+    }
+
+    @Test
+    fun extract_all_parse_inputs_single_item_falls_back_to_extract_parse_input() {
+        assertEquals(
+            listOf("https://v.douyin.com/abcdef/"),
+            ClipboardShareContent.extractAllParseInputs("分享作品 https://v.douyin.com/abcdef/ 复制此链接")
+        )
+    }
+
+    @Test
+    fun extract_all_parse_inputs_empty_for_no_links() {
+        assertTrue(ClipboardShareContent.extractAllParseInputs("没有任何链接").isEmpty())
+        assertTrue(ClipboardShareContent.extractAllParseInputs("").isEmpty())
+    }
 }

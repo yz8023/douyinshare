@@ -75,6 +75,27 @@ data class QualitySelectionRequest(
     val continuation: kotlinx.coroutines.CompletableDeferred<VideoQualityOption?>
 )
 
+/** 多链接批量解析状态（主页粘贴整段多链接文本时使用） */
+sealed interface MultiLinkParseState {
+    data object Idle : MultiLinkParseState
+
+    data class Running(
+        val current: Int,
+        val total: Int,
+        val succeeded: Int,
+        val failed: Int,
+        val lastTitle: String?
+    ) : MultiLinkParseState
+
+    data class Finished(
+        val total: Int,
+        val succeeded: Int,
+        val failed: Int
+    ) : MultiLinkParseState
+
+    data class Error(val msg: String) : MultiLinkParseState
+}
+
 class ParserViewModel(application: Application) : AndroidViewModel(application) {
     private data class BatchPositionSelection(
         val startIndex: Int,
@@ -120,6 +141,9 @@ class ParserViewModel(application: Application) : AndroidViewModel(application) 
 
     private val _parseResult = mutableStateOf<ParseResult>(ParseResult.Idle)
     val parseResult: State<ParseResult> = _parseResult
+
+    private val _multiLinkParseState = mutableStateOf<MultiLinkParseState>(MultiLinkParseState.Idle)
+    val multiLinkParseState: State<MultiLinkParseState> = _multiLinkParseState
 
     private val _batchParseResult = mutableStateOf<BatchParseResult>(BatchParseResult.Idle)
     val batchParseResult: State<BatchParseResult> = _batchParseResult
@@ -293,7 +317,7 @@ class ParserViewModel(application: Application) : AndroidViewModel(application) 
         val input = text.trim()
         parseJob?.cancel()
 
-        // 鐜妫€娴嬶細璋冭瘯鍣?浠ｇ悊/VPN/Hook 绛夊紓甯哥幆澧冪洿鎺ユ嫆缁濓紝鎻愮ず鏈嶅姟涓嶅彲鐢?
+        // 环境检测：调试器/代理/VPN/Hook 等异常环境直接拒绝，提示服务不可用
         if (!SecurityGuard.enforce(getApplication())) {
             _parseResult.value = ParseResult.Error(SERVICE_UNAVAILABLE_MESSAGE)
             return
@@ -304,10 +328,10 @@ class ParserViewModel(application: Application) : AndroidViewModel(application) 
             return
         }
 
-        val isId = input.matches(digitsRegex)
-        val detectedPlatform = Forinxy.jiexi.builtin.Platform.detect(input)
-        if (!isId && detectedPlatform == null) {
-            _parseResult.value = ParseResult.Error(INVALID_INPUT_MESSAGE)
+        // 多链接批量解析：粘贴的整段文本含 2 条及以上可解析输入时，逐条解析并统一写入历史
+        val multiInputs = ClipboardShareContent.extractAllParseInputs(input)
+        if (multiInputs.size > 1) {
+            startMultiLinkParse(multiInputs)
             return
         }
 
@@ -318,8 +342,16 @@ class ParserViewModel(application: Application) : AndroidViewModel(application) 
             return
         }
 
+        val isId = input.matches(digitsRegex)
+        val detectedPlatform = Forinxy.jiexi.builtin.Platform.detect(input)
+        if (!isId && detectedPlatform == null) {
+            _parseResult.value = ParseResult.Error(INVALID_INPUT_MESSAGE)
+            return
+        }
+
         _parseResult.value = ParseResult.Loading
         _videoQualityOptions.value = null
+        _multiLinkParseState.value = MultiLinkParseState.Idle
 
         val requestToken = ++parseRequestToken
         parseJob = viewModelScope.launch {
@@ -355,6 +387,84 @@ class ParserViewModel(application: Application) : AndroidViewModel(application) 
                 if (requestToken == parseRequestToken) {
                     _parseResult.value = ParseResult.Error("\u89e3\u6790\u5931\u8d25: ${e.message}")
                 }
+            }
+        }
+    }
+
+    /**
+     * 多链接批量解析：对拆出的每条输入依次走单条解析，成功的写入解析历史，
+     * 失败条目不写历史并继续下一条；结束后刷新历史列表。
+     */
+    private fun startMultiLinkParse(inputs: List<String>) {
+        if (inputs.isEmpty()) {
+            _parseResult.value = ParseResult.Error(INVALID_INPUT_MESSAGE)
+            return
+        }
+        _multiLinkParseState.value = MultiLinkParseState.Running(
+            current = 0,
+            total = inputs.size,
+            succeeded = 0,
+            failed = 0,
+            lastTitle = null
+        )
+        _parseResult.value = ParseResult.Idle
+        _videoQualityOptions.value = null
+
+        val requestToken = ++parseRequestToken
+        parseJob = viewModelScope.launch {
+            var succeeded = 0
+            var failed = 0
+            var lastTitle: String? = null
+            val interval = workRequestIntervalMs()
+            for ((index, input) in inputs.withIndex()) {
+                if (requestToken != parseRequestToken) {
+                    throw CancellationException("Superseded by a newer parse request")
+                }
+                val result = try {
+                    val startTime = System.currentTimeMillis()
+                    var parsed = performParse(input, useCookie = true)
+                    if (parsed is ParseResult.Success) {
+                        parsed = parsed.copy(
+                            duration = (System.currentTimeMillis() - startTime) / 1000.0,
+                            lastPlayUrlUpdateTime = System.currentTimeMillis() / 1000
+                        )
+                    }
+                    parsed
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    ParseResult.Error("\u89e3\u6790\u5931\u8d25: ${e.message}")
+                }
+
+                if (result is ParseResult.Success) {
+                    succeeded += 1
+                    lastTitle = result.title
+                    saveParseResult(result)
+                } else {
+                    failed += 1
+                }
+
+                if (requestToken == parseRequestToken) {
+                    _multiLinkParseState.value = MultiLinkParseState.Running(
+                        current = index + 1,
+                        total = inputs.size,
+                        succeeded = succeeded,
+                        failed = failed,
+                        lastTitle = lastTitle
+                    )
+                }
+
+                if (index < inputs.lastIndex && interval > 0L) {
+                    delay(DouyinRequestLimiter.jitteredIntervalMs(interval))
+                }
+            }
+
+            if (requestToken == parseRequestToken) {
+                _multiLinkParseState.value = MultiLinkParseState.Finished(
+                    total = inputs.size,
+                    succeeded = succeeded,
+                    failed = failed
+                )
             }
         }
     }

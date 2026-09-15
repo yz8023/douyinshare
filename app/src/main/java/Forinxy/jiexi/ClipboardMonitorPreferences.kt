@@ -51,6 +51,37 @@ object ClipboardShareContent {
         return null
     }
 
+    /**
+     * 从一段文本中提取全部可解析输入（多链接批量解析用）：
+     * - 所有支持平台的链接（shareUrlRegex 全量匹配）
+     * - 链接之外的裸 19 位作品 ID / BV 号
+     * 按出现顺序去重返回；一段文本可能同时含多条链接与说明文字。
+     */
+    fun extractAllParseInputs(text: String): List<String> {
+        val urlMatches = shareUrlRegex.findAll(text).toList()
+        // 裸 BV 号 / 裸 19 位 ID：不落在已提取链接内部的才单独收录
+        fun insideAnyUrl(range: IntRange): Boolean =
+            urlMatches.any { it.range.first <= range.first && range.last <= it.range.last }
+        val bvPattern = Regex("BV1[a-zA-Z0-9]{9}")
+        val bvMatches = bvPattern.findAll(text).filter {
+            !insideAnyUrl(it.range) && Forinxy.jiexi.builtin.Platform.detect(it.value) != null
+        }
+        val plainIdPattern = Regex("\\d{19}")
+        val idMatches = plainIdPattern.findAll(text).filter {
+            !insideAnyUrl(it.range) && Forinxy.jiexi.builtin.Platform.detect(it.value) != null
+        }
+        // 全部候选统一按出现位置排序后去重，保证输出顺序与文本出现顺序一致
+        val ordered = (urlMatches.map { it.range.first to it.value } +
+            bvMatches.map { it.range.first to it.value } +
+            idMatches.map { it.range.first to it.value })
+            .filter { (_, v) -> isSupportedShareUrl(v) || Forinxy.jiexi.builtin.Platform.detect(v) != null }
+            .sortedBy { it.first }
+        val seen = mutableSetOf<String>()
+        return ordered.mapNotNull { (_, v) ->
+            if (seen.add(v)) v else null
+        }
+    }
+
     /** 内容指纹：用于去重 */
     fun contentHash(content: String): String {
         val md = MessageDigest.getInstance("SHA-256")
