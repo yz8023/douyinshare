@@ -59,7 +59,7 @@ internal class MultiPlatformParser(context: Context) : MediaParser {
 
     override fun diag(): String {
         val obj = com.google.gson.JsonObject()
-        obj.addProperty("version", "dyparse-builtin-4.6")
+        obj.addProperty("version", "dyparse-builtin-4.7")
         obj.addProperty("platform", "android-inner")
         obj.addProperty("success", true)
         val supported = com.google.gson.JsonArray()
