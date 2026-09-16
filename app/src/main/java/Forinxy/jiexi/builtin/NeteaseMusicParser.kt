@@ -80,7 +80,7 @@ internal class NeteaseMusicParser(private val http: PlatformHttp) : PlatformPars
     }
 
     private fun buildSongData(shareUrl: String, input: String): MediaData {
-        val playable = audioUrl ?: throw ParseException("该歌曲无可用试听/受版权保护")
+        val playable = audioUrl ?: throw ParseException(failureReason())
         val md = MediaData()
         md.type = "music"
         md.playUrl = playable
@@ -270,6 +270,9 @@ internal class NeteaseMusicParser(private val http: PlatformHttp) : PlatformPars
             "https://music.163.com/api/song/enhance/player/url",
             mapOf("id" to numericId.toString(), "ids" to "[$numericId]", "br" to "320000")
         )
+        if (player != null && player.asLong("code") == -462L) {
+            riskControlled = true
+        }
         val entries = player?.asArrayOrEmpty("data") ?: JsonArray()
         if (audioUrl.isNullOrBlank() && entries.size() > 0 && entries.get(0).isJsonObject) {
             val url = entries.get(0).asJsonObject.asString("url")
@@ -277,6 +280,14 @@ internal class NeteaseMusicParser(private val http: PlatformHttp) : PlatformPars
         }
         parseLyrics(numericId.toString())
         return true
+    }
+
+    /** 失败原因：优先提示网易云风控验证，其次才是版权/无试听 */
+    private fun failureReason(): String {
+        if (riskControlled) {
+            return "网易云接口触发验证码风控，请稍后重试或配置网易云登录 Cookie"
+        }
+        return "该歌曲无可用试听/受版权保护"
     }
 
     /** /api/song/lyric 取 LRC 原文，转换为带时间轴的歌词行。 */
@@ -531,6 +542,7 @@ internal class NeteaseMusicParser(private val http: PlatformHttp) : PlatformPars
     private var authorId: String? = null
     private var mediaId: String? = null
     private var durationSec: Double = 0.0
+    private var riskControlled: Boolean = false
     private var images: MutableList<String> = mutableListOf()
     private var galleryItems: MutableList<GalleryItem> = mutableListOf()
     private var lyrics: MutableList<LyricLine> = mutableListOf()
@@ -544,6 +556,7 @@ internal class NeteaseMusicParser(private val http: PlatformHttp) : PlatformPars
         authorId = null
         mediaId = null
         durationSec = 0.0
+        riskControlled = false
         images = mutableListOf()
         galleryItems = mutableListOf()
         lyrics = mutableListOf()

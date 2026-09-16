@@ -142,7 +142,7 @@ internal class XiaoHongShuParser(private val http: PlatformHttp) : PlatformParse
         val PRESERVED_PARAMS = listOf("xsec_token", "xsec_source", "source", "xhsshare", "app_platform")
 
         const val TAG = "XiaoHongShuParser"
-        const val ERR_DELETED = "笔记已被删除或不存在"
+        const val ERR_DELETED = "笔记已被删除或链接缺少访问签名(xsec_token)，请从小红书 App 复制完整分享链接"
         const val ERR_RISK = "访问被小红书风控拦截，请配置小红书登录 Cookie 后重试"
     }
 

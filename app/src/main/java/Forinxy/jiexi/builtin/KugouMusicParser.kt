@@ -40,14 +40,32 @@ internal class KugouMusicParser(private val http: PlatformHttp) : PlatformParser
 
     private fun doParse(input: String): String {
         val link = input.trim()
-        val media = detectMedia(link) ?: return failResponse("无法识别酷狗音乐链接")
+        var media = detectMedia(link)
+        // 短链（t1.kugou.com）等需先跟随重定向拿到落地页再识别类型
+        var resolvedUrl: String? = null
+        if (media == null) {
+            resolvedUrl = resolveShortLink(link)
+            if (resolvedUrl != null) {
+                media = detectMedia(resolvedUrl)
+            }
+        }
+        if (media == null) return failResponse("无法识别酷狗音乐链接")
+        val fetchUrl = resolvedUrl ?: link
         val md = if (media.first == "mv") {
             fetchMv(media.second) ?: return failResponse("MV不存在或已删除")
         } else {
-            fetchSong(link) ?: return failResponse("歌曲不存在或已删除")
+            fetchSong(fetchUrl) ?: return failResponse("歌曲不存在或已删除")
         }
         md.inputUrl = input
         return md.toServerJson()
+    }
+
+    /** 跟随重定向（OkHttp 默认跟随 302）拿到最终落地地址 */
+    private fun resolveShortLink(url: String): String? {
+        if (!url.contains("t1.kugou.com") && !url.contains("t3.kugou.com")) return null
+        val resp = http.get(url, mobileHeaders) ?: return null
+        val finalUrl = resp.finalUrl.takeIf { it.isNotBlank() && it != url }
+        return finalUrl
     }
 
     private fun detectMedia(input: String): Pair<String, String>? {
