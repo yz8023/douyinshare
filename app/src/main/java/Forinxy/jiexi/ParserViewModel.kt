@@ -75,6 +75,14 @@ data class QualitySelectionRequest(
     val continuation: kotlinx.coroutines.CompletableDeferred<VideoQualityOption?>
 )
 
+/** 单条批量解析失败记录（用于展示与一键复制） */
+data class MultiLinkFailure(
+    val input: String,
+    val msg: String
+) {
+    val summary: String get() = msg
+}
+
 /** 多链接批量解析状态（主页粘贴整段多链接文本时使用） */
 sealed interface MultiLinkParseState {
     data object Idle : MultiLinkParseState
@@ -90,7 +98,8 @@ sealed interface MultiLinkParseState {
     data class Finished(
         val total: Int,
         val succeeded: Int,
-        val failed: Int
+        val failed: Int,
+        val failures: List<MultiLinkFailure> = emptyList()
     ) : MultiLinkParseState
 
     data class Error(val msg: String) : MultiLinkParseState
@@ -415,6 +424,7 @@ class ParserViewModel(application: Application) : AndroidViewModel(application) 
             var succeeded = 0
             var failed = 0
             var lastTitle: String? = null
+            val failures = ArrayList<MultiLinkFailure>()
             val interval = workRequestIntervalMs()
             for ((index, input) in inputs.withIndex()) {
                 if (requestToken != parseRequestToken) {
@@ -442,6 +452,9 @@ class ParserViewModel(application: Application) : AndroidViewModel(application) 
                     saveParseResult(result)
                 } else {
                     failed += 1
+                    val errorMsg = (result as? ParseResult.Error)?.msg
+                        ?: "解析失败：未知错误"
+                    failures.add(MultiLinkFailure(input = input, msg = errorMsg))
                 }
 
                 if (requestToken == parseRequestToken) {
@@ -463,7 +476,8 @@ class ParserViewModel(application: Application) : AndroidViewModel(application) 
                 _multiLinkParseState.value = MultiLinkParseState.Finished(
                     total = inputs.size,
                     succeeded = succeeded,
-                    failed = failed
+                    failed = failed,
+                    failures = failures
                 )
             }
         }

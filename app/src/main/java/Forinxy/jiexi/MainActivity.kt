@@ -111,6 +111,7 @@ import androidx.compose.ui.platform.ClipboardManager
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -1011,7 +1012,19 @@ fun ParserUI(
                 }
                 is ParseResult.Error -> {
                     item(span = { GridItemSpan(3) }) {
-                        Text(result.msg, color = MaterialTheme.colorScheme.error)
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(result.msg, color = MaterialTheme.colorScheme.error)
+                            if (result.msg.isNotBlank()) {
+                                MiuixOutlinedButton(
+                                    onClick = {
+                                        clipboardManager.setText(AnnotatedString(result.msg))
+                                        Toast.makeText(context, "错误信息已复制", Toast.LENGTH_SHORT).show()
+                                    }
+                                ) {
+                                    Text("复制错误信息")
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1066,6 +1079,49 @@ fun ParserUI(
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                                if (state.failures.isNotEmpty()) {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = "失败明细",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                    state.failures.forEach { failure ->
+                                        Text(
+                                            text = failure.input,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = failure.msg,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.error,
+                                            maxLines = 3,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    MiuixOutlinedButton(
+                                        onClick = {
+                                            val textToCopy = buildString {
+                                                appendLine("批量解析失败清单（成功 ${state.succeeded} / ${state.total}）：")
+                                                state.failures.forEachIndexed { i, failure ->
+                                                    append("${i + 1}. ")
+                                                    append(failure.input)
+                                                    appendLine()
+                                                    append("   ")
+                                                    appendLine(failure.msg)
+                                                }
+                                            }
+                                            clipboardManager.setText(AnnotatedString(textToCopy.trimEnd()))
+                                            Toast.makeText(context, "失败信息已复制", Toast.LENGTH_SHORT).show()
+                                        }
+                                    ) {
+                                        Text("复制失败信息")
+                                    }
+                                }
                             }
                         }
                     }
