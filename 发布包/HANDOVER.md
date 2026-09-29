@@ -87,6 +87,11 @@ cp local.properties.example local.properties
 ## 6. 开发进度
 
 - **已完成**：多画质显示与直链下载、作者批量解析、剪贴板监听与历史页、作者主页引导、图集/实况解析与保存配对、内置解析服务器、批量分类筛选（全部/视频/图集/实况）、图集整本下载、画质多档兜底（原画质/最高画质/1080p~360p）、403 修复（AnonymousSessionStore 兜底 + cookie 预热链路 + flat_images 支持）、多平台解析（48 个平台全部内置本地，抖音存量行为不变）、悬浮球保活（FloatingBallService/View/Preferences + 剪贴板监听 ACTION_POLL_NOW）、多链接批量解析（主页粘贴整段多链接文本自动拆分逐条解析并写历史）、登录 Cookie 管理（复制/导出/导入，支持登录态受限内容如抖音限时日常）、抖音 detail API 兜底（分享页被过滤的限时日常/story 内容回退走 a_bogus 签名 detail API，配合登录 Cookie 解析）、批量解析失败明细展示与一键复制（v4.11.1：完成态展示每条失败链接+错误信息，支持「复制失败信息」；单条解析错误支持「复制错误信息」）、批量失败平台修复（v4.11.2：酷狗 t1.kugou.com 短链跟随重定向识别 MV/歌曲；微视 PC/移动 UA 依次尝试自动回退；网易云识别 code=-462 验证码风控并给出准确提示；小红书笔记 404 提示链接可能缺少 xsec_token 签名）。
+- **v4.11.2 之后的新增能力**（本次迭代）：
+  - 批量解析记录一键展开全部详情：主页「多链接批量解析」完成卡与「批量历史」tab 记录，点击即展开、全部解析结果平铺展示（3 列网格），点任一结果逐条查看详情/保存（新增 `ParseResultTiles.kt` 共用平铺组件；`MultiLinkParseState.Finished.results` 携带成功结果列表）。
+  - 画质归一化与去重（借鉴 jicun-）：`builtin/ParserKit.kt` 输出 `quality_list` 前做标签归一化（`1080P高清`/`1920x1080`/`超清1080` → `1080P`），同分辨率多码流只保留最高码率档，档位按分辨率从高到低排序，并对同 scheme+host+path 的重复资源去重。
+  - 落盘格式嗅探（借鉴 jicun-）：`FileSaver.kt` 保存前读取响应文件头 magic bytes 与 Content-Type 定真实扩展名，动图（GIF/WEBP）/HEIF/AVIF/MP3/FLAC 等不再因 URL 后缀或 MIME 缺失存成 `.jpg`/`.mp4`。
+  - 纯文案支持：`ParseResult.Success.textContent` + 服务端 `text_content` 字段贯通，详情弹窗对文案帖提供「复制文案」「保存文案（.txt）」。
 - **进行中**：无。
 - **已搁置**：`server/config.php`（本机未配置，用的是 example 占位，部署在自己服务器时才需要真实值）。
 - **最近可运行 commit**：`99572a9`（v4.11.2，GitHub release 已发布；tag `v4.11` 指 `2b1e217`）。

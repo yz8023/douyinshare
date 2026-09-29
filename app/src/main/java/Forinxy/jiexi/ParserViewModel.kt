@@ -99,7 +99,8 @@ sealed interface MultiLinkParseState {
         val total: Int,
         val succeeded: Int,
         val failed: Int,
-        val failures: List<MultiLinkFailure> = emptyList()
+        val failures: List<MultiLinkFailure> = emptyList(),
+        val results: List<ParseResult.Success> = emptyList()
     ) : MultiLinkParseState
 
     data class Error(val msg: String) : MultiLinkParseState
@@ -425,6 +426,7 @@ class ParserViewModel(application: Application) : AndroidViewModel(application) 
             var failed = 0
             var lastTitle: String? = null
             val failures = ArrayList<MultiLinkFailure>()
+            val successes = ArrayList<ParseResult.Success>()
             val interval = workRequestIntervalMs()
             for ((index, input) in inputs.withIndex()) {
                 if (requestToken != parseRequestToken) {
@@ -449,6 +451,7 @@ class ParserViewModel(application: Application) : AndroidViewModel(application) 
                 if (result is ParseResult.Success) {
                     succeeded += 1
                     lastTitle = result.title
+                    successes.add(result)
                     saveParseResult(result)
                 } else {
                     failed += 1
@@ -477,7 +480,8 @@ class ParserViewModel(application: Application) : AndroidViewModel(application) 
                     total = inputs.size,
                     succeeded = succeeded,
                     failed = failed,
-                    failures = failures
+                    failures = failures,
+                    results = successes
                 )
             }
         }
@@ -1881,8 +1885,46 @@ private suspend fun performParse(input: String, useCookie: Boolean = false): Par
         }
     }
 
-    private fun buildLrc(lines: List<LyricLine>): String {
-        val sb = StringBuilder()
+    /** 保存纯文案到下载目录（.txt） */
+    fun saveTextContent(context: Context, result: ParseResult.Success) {
+        if (_saveState.value.isSaving) return
+        if (!SecurityGuard.enforce(context.applicationContext)) {
+            Toast.makeText(context, SERVICE_UNAVAILABLE_MESSAGE, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val text = result.textContent?.takeIf { it.isNotBlank() }
+        if (text == null) {
+            Toast.makeText(context, "\u6587\u6848\u4fdd\u5b58\u5931\u8d25", Toast.LENGTH_SHORT).show()
+            return
+        }
+        viewModelScope.launch {
+            _saveState.value = SaveState(
+                isSaving = true,
+                total = 1,
+                current = 0,
+                progress = 0f,
+                label = "\u4fdd\u5b58\u6587\u6848",
+                indeterminate = true
+            )
+            val fileName = result.titlePrefixForFileName()
+                .let { buildBaseMediaName(it, result.author, "text") }
+            val success = saveTextFile(
+                context = context,
+                fileName = fileName,
+                content = text,
+                extension = "txt",
+                mimeType = "text/plain"
+            )
+            _saveState.value = SaveState()
+            Toast.makeText(
+                context,
+                if (success) "\u6587\u6848\u5df2\u4fdd\u5b58" else "\u6587\u6848\u4fdd\u5b58\u5931\u8d25",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
+    private fun buildLrc(lines: List<LyricLine>): String {        val sb = StringBuilder()
         lines.forEach { line ->
             val ts = line.start?.let { formatLrcTime(it) }
             if (ts != null) {

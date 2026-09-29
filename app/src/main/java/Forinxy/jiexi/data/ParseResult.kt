@@ -58,7 +58,9 @@ sealed class ParseResult {
         // 服务器返回的全部可选画质（含预估大小），供保存前选择
         val qualityList: List<VideoQualityOption>? = null,
         // 歌词行（LRC 风格：text / start / end，秒）
-        val lyrics: List<LyricLine>? = null
+        val lyrics: List<LyricLine>? = null,
+        // 纯文案内容（文章/文案帖，无媒体时展示并可保存为 txt）
+        val textContent: String? = null
     ) : ParseResult()
 
     data class Error(val msg: String) : ParseResult()

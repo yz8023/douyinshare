@@ -56,6 +56,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
@@ -139,6 +141,8 @@ import Forinxy.jiexi.ui.page.BatchParsePage
 import Forinxy.jiexi.ui.page.ClipboardRecordsPage
 import Forinxy.jiexi.ui.page.DouyinLoginPage
 import Forinxy.jiexi.ui.page.ParseHistoryPage
+import Forinxy.jiexi.ui.page.ParseItemDetailDialog
+import Forinxy.jiexi.ui.page.ParseResultTileGrid
 import Forinxy.jiexi.ui.theme.DyparseTheme
 import Forinxy.jiexi.ui.theme.MiuixAlertDialog
 import Forinxy.jiexi.ui.theme.MiuixOutlinedButton
@@ -735,6 +739,14 @@ fun ParserUI(
     val clipboardManager: ClipboardManager = LocalClipboardManager.current
     val selectedGalleryItems = remember { mutableStateMapOf<Int, Boolean>() }
     var previewLivePhoto by remember { mutableStateOf<GalleryMedia?>(null) }
+    var detailItem by remember { mutableStateOf<ParseResult.Success?>(null) }
+    var multiLinkExpanded by remember { mutableStateOf(false) }
+
+    LaunchedEffect(multiLinkParseState) {
+        if (multiLinkParseState !is MultiLinkParseState.Finished) {
+            multiLinkExpanded = false
+        }
+    }
 
     val silentClickModifier = @Composable { onClick: () -> Unit ->
         Modifier.clickable(
@@ -1062,23 +1074,49 @@ fun ParserUI(
                 }
                 is MultiLinkParseState.Finished -> {
                     item(span = { GridItemSpan(3) }) {
-                        MiuixSurface(modifier = Modifier.fillMaxWidth()) {
+                        MiuixSurface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null
+                                ) { multiLinkExpanded = !multiLinkExpanded }
+                        ) {
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(16.dp),
                                 horizontalAlignment = Alignment.Start
                             ) {
-                                Text(
-                                    text = "批量解析完成：成功 ${state.succeeded} / ${state.total}" +
-                                        (if (state.failed > 0) "，失败 ${state.failed}" else ""),
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text(
-                                    text = "成功结果已写入解析历史",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "批量解析完成：成功 ${state.succeeded} / ${state.total}" +
+                                                (if (state.failed > 0) "，失败 ${state.failed}" else ""),
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Text(
+                                            text = "成功结果已写入解析历史",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    if (state.results.isNotEmpty()) {
+                                        Icon(
+                                            imageVector = if (multiLinkExpanded) {
+                                                Icons.Filled.ExpandLess
+                                            } else {
+                                                Icons.Filled.ExpandMore
+                                            },
+                                            contentDescription = if (multiLinkExpanded) "收起" else "展开全部详情",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
                                 if (state.failures.isNotEmpty()) {
                                     Spacer(modifier = Modifier.height(8.dp))
                                     Text(
@@ -1125,6 +1163,23 @@ fun ParserUI(
                             }
                         }
                     }
+                    if (multiLinkExpanded && state.results.isNotEmpty()) {
+                        item(span = { GridItemSpan(3) }) {
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Text(
+                                    text = "全部解析结果（${state.results.size}）",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                ParseResultTileGrid(
+                                    items = state.results,
+                                    columns = 3,
+                                    onOpen = { detailItem = it }
+                                )
+                            }
+                        }
+                    }
                 }
                 is MultiLinkParseState.Error -> {
                     item(span = { GridItemSpan(3) }) {
@@ -1152,6 +1207,15 @@ fun ParserUI(
             viewModel = viewModel,
             media = media,
             onDismiss = { previewLivePhoto = null }
+        )
+    }
+
+    detailItem?.let { item ->
+        ParseItemDetailDialog(
+            viewModel = viewModel,
+            item = item,
+            onDismiss = { detailItem = null },
+            onItemUpdated = { updatedItem -> detailItem = updatedItem }
         )
     }
 }

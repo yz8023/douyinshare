@@ -16,12 +16,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import java.io.PushbackInputStream
 import java.io.RandomAccessFile
 import java.net.SocketTimeoutException
 import java.nio.ByteBuffer
@@ -258,12 +260,32 @@ private suspend fun downloadAndSaveOnce(
             onProgress(0L, contentLength)
         }
 
-        body.byteStream().use { inputStream ->
+        val peekedStream = PushbackInputStream(
+            BufferedInputStream(body.byteStream(), STREAM_BUFFER_SIZE),
+            16
+        )
+        val sniffedExt = sniffResponseExtension(
+            peekedStream,
+            contentType = response.header("Content-Type"),
+            mimeType = mimeType
+        )
+        val actualFileName = if (sniffedExt != null) {
+            val currentExt = finalFileName.substringAfterLast('.', "").lowercase()
+            if (currentExt == sniffedExt.lowercase()) {
+                finalFileName
+            } else {
+                "${finalFileName.substringBeforeLast('.', finalFileName)}.$sniffedExt"
+            }
+        } else {
+            finalFileName
+        }
+
+        peekedStream.use { inputStream ->
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 saveToDownloadsMediaStore(
                     context = context,
                     inputStream = inputStream,
-                    fileName = finalFileName,
+                    fileName = actualFileName,
                     mimeType = mimeType,
                     subPath = subPath,
                     totalLength = contentLength,
@@ -272,7 +294,7 @@ private suspend fun downloadAndSaveOnce(
             } else {
                 saveToDownloadsDirectory(
                     inputStream = inputStream,
-                    fileName = finalFileName,
+                    fileName = actualFileName,
                     subPath = subPath,
                     totalLength = contentLength,
                     onProgress = onProgress
@@ -281,6 +303,127 @@ private suspend fun downloadAndSaveOnce(
         }
     }
 }
+
+/**
+ * 从响应流开头嗅探真实格式扩展名（文件头优先，其次 Content-Type），认不出返回 null。
+ * 头条动图等地址的 URL 后缀是 `~tplv-tt-large.image` 而响应头是 `image/gif`，
+ * 只能靠文件头/响应头定后缀，避免动图存成 .jpg、HEIF 存错扩展名。
+ * 传入的 [stream] 必须是可回退的 PushbackInputStream（读取后会把文件头推回）。
+ */
+private fun sniffResponseExtension(
+    stream: PushbackInputStream,
+    contentType: String?,
+    mimeType: String
+): String? {
+    return try {
+        val kind = when {
+            mimeType.startsWith("image") -> "image"
+            mimeType.startsWith("audio") -> "audio"
+            else -> "video"
+        }
+        val head = ByteArray(16)
+        var headLen = 0
+        while (headLen < head.size) {
+            val n = stream.read(head, headLen, head.size - headLen)
+            if (n == -1) break
+            headLen += n
+        }
+        if (headLen == 0) return null
+        stream.unread(head, 0, headLen)
+        val fromBytes = extensionForBytes(head.copyOf(headLen))
+        fromBytes ?: extensionForContentType(contentType, kind)
+    } catch (e: Exception) {
+        null
+    }
+}
+
+/** 文件头 magic bytes → 扩展名（无点），认不出返回 null。 */
+private fun extensionForBytes(head: ByteArray): String? {
+    fun at(i: Int, magic: ByteArray): Boolean {
+        if (head.size < i + magic.size) return false
+        for (k in magic.indices) {
+            if (head[i + k] != magic[k]) return false
+        }
+        return true
+    }
+
+    if (at(0, byteArrayOf(0x47, 0x49, 0x46, 0x38))) return "gif"
+    if (at(0, byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A))) return "png"
+    if (at(0, byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte()))) return "jpg"
+    if (at(0, byteArrayOf(0x42, 0x4D))) return "bmp"
+    if (at(0, byteArrayOf(0x1A, 0x45, 0xDF.toByte(), 0xA3.toByte()))) return "webm"
+    if (at(0, byteArrayOf(0x66, 0x4C, 0x61, 0x43))) return "flac"
+    if (at(0, byteArrayOf(0x4F, 0x67, 0x67, 0x53))) return "ogg"
+    if (at(0, byteArrayOf(0x52, 0x49, 0x46, 0x46)) && at(8, byteArrayOf(0x57, 0x41, 0x56, 0x45))) {
+        return "wav"
+    }
+    if (at(0, byteArrayOf(0x49, 0x44, 0x33)) ||
+        at(0, byteArrayOf(0xFF.toByte(), 0xFB.toByte())) ||
+        at(0, byteArrayOf(0xFF.toByte(), 0xF3.toByte()))
+    ) {
+        return "mp3"
+    }
+    if (at(0, byteArrayOf(0x52, 0x49, 0x46, 0x46))) {
+        if (at(8, byteArrayOf(0x57, 0x45, 0x42, 0x50))) return "webp"
+        if (at(8, byteArrayOf(0x41, 0x56, 0x49, 0x20))) return "avi"
+    }
+    // HEIF/AVIF/MP4/MOV/M4A 共用 MP4 盒子：offset 4 是 'ftyp'，8 起是 brand。
+    if (at(4, byteArrayOf(0x66, 0x74, 0x79, 0x70))) {
+        val brand = String(head, 8, minOf(head.size - 8, 4), Charsets.US_ASCII)
+        if (brand.startsWith("avif") || brand.startsWith("avis")) return "avif"
+        if (brand.startsWith("heic") || brand.startsWith("heix") || brand.startsWith("mif1")) {
+            return "heic"
+        }
+        if (brand.startsWith("qt")) return "mov"
+        if (brand.startsWith("M4A")) return "m4a"
+        // brand 认不出（CDN 常见）：长度够了按 MP4 记，比留 .part 强。
+        return if (head.size >= 16) "mp4" else null
+    }
+    return null
+}
+
+/** 扩展名（无点）属于哪一类媒体，用于校验 Content-Type 猜测与下载类型是否一致。 */
+private fun extensionKind(ext: String): String? = when (ext) {
+    "jpg", "jpeg", "png", "gif", "webp", "avif", "heic", "heif", "bmp", "tif", "tiff" -> "image"
+    "mp4", "m4v", "mov", "webm", "mkv", "avi", "flv", "ts" -> "video"
+    "mp3", "m4a", "aac", "wav", "flac", "ogg", "oga", "opus" -> "audio"
+    else -> null
+}
+
+/** Content-Type → 扩展名（无点），与下载类型不符时返回 null。 */
+private fun extensionForContentType(contentType: String?, expectedKind: String): String? {
+    val mime = (contentType ?: "").split(';').first().trim().lowercase()
+    val ext = MIME_EXT_MAP[mime] ?: return null
+    return if (extensionKind(ext) == expectedKind) ext else null
+}
+
+/** Content-Type → 扩展名（无点）映射，只认有把握的几个。 */
+private val MIME_EXT_MAP: Map<String, String> = mapOf(
+    "image/gif" to "gif",
+    "image/jpeg" to "jpg",
+    "image/jpg" to "jpg",
+    "image/pjpeg" to "jpg",
+    "image/png" to "png",
+    "image/webp" to "webp",
+    "image/avif" to "avif",
+    "image/heic" to "heic",
+    "image/heif" to "heic",
+    "image/bmp" to "bmp",
+    "image/tiff" to "tiff",
+    "video/mp4" to "mp4",
+    "video/quicktime" to "mov",
+    "video/webm" to "webm",
+    "video/x-matroska" to "mkv",
+    "audio/mpeg" to "mp3",
+    "audio/mp4" to "m4a",
+    "audio/x-m4a" to "m4a",
+    "audio/aac" to "aac",
+    "audio/wav" to "wav",
+    "audio/x-wav" to "wav",
+    "audio/flac" to "flac",
+    "audio/x-flac" to "flac",
+    "audio/ogg" to "ogg"
+)
 
 @SuppressLint("NewApi")
 private suspend fun saveToDownloadsMediaStore(

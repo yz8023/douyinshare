@@ -214,7 +214,8 @@ object ServerApiClient {
             batchId = batchId,
             originalPlayUrl = str("original_play_url"),
             qualityList = qualityList,
-            lyrics = lyrics
+            lyrics = lyrics,
+            textContent = str("text_content")
         )
     }
 

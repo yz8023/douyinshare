@@ -53,6 +53,7 @@ class MediaData {
     val gallery = mutableListOf<GalleryItem>()
     private val qualities = mutableListOf<QualityOption>()
     val lyrics = mutableListOf<LyricLine>()
+    var textContent: String? = null
 
     val isImage: Boolean get() = type == "image"
     val isMusic: Boolean get() = type == "music"
@@ -79,10 +80,34 @@ class MediaData {
 
     fun qualityListJson(): JsonArray {
         val list = JsonArray()
+        val best = LinkedHashMap<String, QualityOption>()
+        val unknown = mutableListOf<QualityOption>()
         qualities.forEachIndexed { index, q ->
             if (q.url.isBlank()) return@forEachIndexed
+            val label = normalizeQualityLabel(q.label.ifEmpty { "画质${index + 1}" })
+            if (label.isEmpty()) {
+                unknown.add(q)
+                return@forEachIndexed
+            }
+            val current = best[label]
+            if (current == null || betterQualityThan(q, current)) best[label] = q
+        }
+        val known = best.values.sortedWith(
+            compareByDescending<QualityOption> { qualityRankOf(normalizeQualityLabel(it.label)) }
+                .thenBy { normalizeQualityLabel(it.label) }
+        )
+        val seen = HashSet<String>()
+        val ordered = ArrayList<QualityOption>(known.size + unknown.size)
+        for (q in known) {
+            if (seen.add(qualityResourceId(q.url))) ordered.add(q)
+        }
+        for (q in unknown) {
+            if (seen.add(qualityResourceId(q.url))) ordered.add(q)
+        }
+        ordered.forEachIndexed { index, q ->
+            val label = normalizeQualityLabel(q.label.ifEmpty { "画质${index + 1}" })
             val entry = JsonObject()
-            entry.addProperty("label", q.label.ifEmpty { "画质${index + 1}" })
+            entry.addProperty("label", label.ifEmpty { "画质${index + 1}" })
             entry.addProperty("ratio", q.ratio.ifEmpty { "default" })
             entry.addProperty("url", q.url)
             if (q.sizeBytes != null && q.sizeBytes > 0) {
@@ -164,6 +189,9 @@ class MediaData {
         }
         obj.add("lyrics", lyricsArray)
 
+        if (textContent != null && textContent!!.isNotBlank()) obj.addProperty("text_content", textContent)
+        else obj.add("text_content", com.google.gson.JsonNull.INSTANCE)
+
         if (resolvedUrl != null) obj.addProperty("resolved_url", resolvedUrl)
         else obj.add("resolved_url", com.google.gson.JsonNull.INSTANCE)
         obj.addProperty("input_url", inputUrl)
@@ -183,4 +211,64 @@ fun failResponse(msg: String, code: Int = 400): String {
     obj.addProperty("error", msg)
     obj.addProperty("code", code)
     return JSON_GSON.toJson(obj)
+}
+
+/**
+ * 画质标签归一化：`1920x1080`/`1080p60`/`720P高清`/`超清1080` 统一成 `1080P`/`720P`。
+ * 与 jicun- 的 normalizeQualityLabel 行为一致，供去重与排序使用。
+ */
+private fun normalizeQualityLabel(raw: String): String {
+    var text = raw.trim()
+    if (text.isEmpty()) return ""
+    val cross = Regex("""(\d{3,4})\s*[xX*]\s*(\d{3,4})""").find(text)
+    if (cross != null) {
+        val a = cross.groupValues[1].toIntOrNull()
+        val b = cross.groupValues[2].toIntOrNull()
+        if (a != null && b != null) return "${minOf(a, b)}P"
+    }
+    text = text.replaceFirst(
+        Regex("""(?<=\d)\s*(高清|超清|蓝光|标清|流畅|原画|高码率|高清版)\s*$"""),
+        ""
+    )
+    val height = Regex("""(\d{3,4})""").find(text)
+    if (height != null) return "${height.groupValues[1]}P"
+    return text
+}
+
+/** 画质排序权重：数字越大越高；纯名字档位给 4K 之上的值，认不出的排最后。 */
+private fun qualityRankOf(label: String): Int {
+    val height = Regex("""\d+""").find(label)?.value?.toIntOrNull()
+    if (height != null && height > 0) return height
+    if (label.isEmpty()) return 0
+    return when (label) {
+        "原画" -> 3000
+        "蓝光" -> 2000
+        "超清" -> 1500
+        "高清" -> 1000
+        else -> 1
+    }
+}
+
+/**
+ * 同一资源的判据：去掉 query 只比 scheme + host + path。
+ * CDN 给同一份文件的不同签名只差 query，需按此去重。
+ */
+private fun qualityResourceId(url: String): String {
+    return try {
+        val uri = android.net.Uri.parse(url)
+        val scheme = uri.scheme
+        val host = uri.host
+        val path = uri.path
+        if (scheme.isNullOrEmpty() || host.isNullOrEmpty()) url else "$scheme://$host${path ?: ""}"
+    } catch (e: Exception) {
+        url
+    }
+}
+
+/** 同分辨率多码流择优：先比码率，再比文件大小。 */
+private fun betterQualityThan(candidate: QualityOption, current: QualityOption): Boolean {
+    if (candidate.bitRate != current.bitRate) return candidate.bitRate > current.bitRate
+    val cSize = candidate.sizeBytes ?: 0L
+    val tSize = current.sizeBytes ?: 0L
+    return cSize > tSize
 }

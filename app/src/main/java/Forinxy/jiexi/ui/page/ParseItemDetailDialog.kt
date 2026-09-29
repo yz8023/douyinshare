@@ -240,6 +240,56 @@ internal fun ParseItemDetailDialog(
                     }
                 }
 
+                val textContent = displayItem.textContent?.takeIf { it.isNotBlank() }
+                if (textContent != null) {
+                    androidx.compose.foundation.layout.Column(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = "文案",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        androidx.compose.material3.Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                        ) {
+                            Text(
+                                text = textContent,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(10.dp),
+                                maxLines = 12,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            OutlinedButton(
+                                onClick = {
+                                    copyPlainText(context, clipboardManager, textContent, "文案已复制")
+                                },
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text("复制文案", fontSize = 10.sp)
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.saveTextContent(context, displayItem)
+                                    onDismiss()
+                                },
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text("保存文案", fontSize = 10.sp)
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+                }
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)

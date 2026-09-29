@@ -34,6 +34,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material3.AlertDialog
@@ -99,6 +101,9 @@ fun ParseHistoryPage(viewModel: ParserViewModel = viewModel()) {
     var selectedBatch by remember { mutableStateOf<BatchAuthorParseSummary?>(null) }
     var selectedBatchWorks by remember { mutableStateOf<List<ParseResult.Success>>(emptyList()) }
     var isLoadingBatchWorks by remember { mutableStateOf(false) }
+    var expandedBatchId by remember { mutableStateOf<String?>(null) }
+    var expandedBatchWorks by remember { mutableStateOf<List<ParseResult.Success>>(emptyList()) }
+    var expandedLoading by remember { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
     var showClearConfirm by remember { mutableStateOf(false) }
     val isResumed by rememberIsResumed()
@@ -132,6 +137,13 @@ fun ParseHistoryPage(viewModel: ParserViewModel = viewModel()) {
         isLoadingBatchWorks = true
         selectedBatchWorks = viewModel.getBatchHistoryWorks(batch.batchId)
         isLoadingBatchWorks = false
+    }
+
+    LaunchedEffect(expandedBatchId) {
+        val batchId = expandedBatchId ?: return@LaunchedEffect
+        expandedLoading = true
+        expandedBatchWorks = viewModel.getBatchHistoryWorks(batchId)
+        expandedLoading = false
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -230,9 +242,48 @@ fun ParseHistoryPage(viewModel: ParserViewModel = viewModel()) {
                             contentPadding = floatingBottomBarContentPadding(horizontal = 12.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            items(filteredBatchHistory, key = { it.batchId }) { item ->
-                                BatchHistoryItem(item) {
-                                    selectedBatch = item
+                            filteredBatchHistory.forEach { item ->
+                                item(key = "batch-${item.batchId}") {
+                                    BatchHistoryItem(
+                                        item = item,
+                                        expanded = expandedBatchId == item.batchId,
+                                        onToggleExpand = {
+                                            expandedBatchId = if (expandedBatchId == item.batchId) {
+                                                null
+                                            } else {
+                                                item.batchId
+                                            }
+                                        },
+                                        onOpenDetail = { selectedBatch = item }
+                                    )
+                                }
+                                if (expandedBatchId == item.batchId) {
+                                    item(key = "batch-works-${item.batchId}") {
+                                        if (expandedLoading) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(vertical = 20.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                                            }
+                                        } else {
+                                            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+                                                Text(
+                                                    text = "全部解析结果（${expandedBatchWorks.size}）",
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                                Spacer(modifier = Modifier.height(8.dp))
+                                                ParseResultTileGrid(
+                                                    items = expandedBatchWorks,
+                                                    columns = 3,
+                                                    onOpen = { showDetailDialog = it }
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
                             item {
@@ -442,11 +493,16 @@ private fun EmptyBatchHistoryState() {
 }
 
 @Composable
-private fun BatchHistoryItem(item: BatchAuthorParseSummary, onClick: () -> Unit) {
+private fun BatchHistoryItem(
+    item: BatchAuthorParseSummary,
+    expanded: Boolean,
+    onToggleExpand: () -> Unit,
+    onOpenDetail: () -> Unit
+) {
     MiuixSurface(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .clickable(onClick = onToggleExpand)
     ) {
         Row(
             modifier = Modifier
@@ -487,6 +543,21 @@ private fun BatchHistoryItem(item: BatchAuthorParseSummary, onClick: () -> Unit)
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.outline
                 )
+            }
+            Spacer(modifier = Modifier.width(4.dp))
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(
+                    imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                    contentDescription = if (expanded) "收起全部解析" else "展开全部解析",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                TextButton(onClick = onOpenDetail) {
+                    Text(
+                        text = "查看详情",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
         }
     }
