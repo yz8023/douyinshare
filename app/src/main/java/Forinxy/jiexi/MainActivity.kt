@@ -1738,6 +1738,9 @@ fun SettingsScreen(active: Boolean = true) {
         var authorApiInput by rememberSaveable(showServerConfigDialog) { mutableStateOf(savedConfig.authorApiBase) }
         var tokenInput by rememberSaveable(showServerConfigDialog) { mutableStateOf(savedConfig.token) }
         var hmacInput by rememberSaveable(showServerConfigDialog) { mutableStateOf(savedConfig.hmacKey) }
+        var cookieInput by rememberSaveable(showServerConfigDialog) {
+            mutableStateOf(DouyinAuthStore.getCookie(context).orEmpty())
+        }
         var isTesting by remember { mutableStateOf(false) }
         var testResult by remember { mutableStateOf("") }
 
@@ -1804,6 +1807,16 @@ fun SettingsScreen(active: Boolean = true) {
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
+                    MiuixTextField(
+                        value = cookieInput,
+                        onValueChange = { cookieInput = it },
+                        label = { Text("抖音 Cookie") },
+                        supportingText = {
+                            Text("登录页会自动填入；保存后用于内置服务器和外部服务端同步")
+                        },
+                        singleLine = false,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                     if (testResult.isNotBlank()) {
                         Text(testResult, style = MaterialTheme.typography.bodySmall)
                     }
@@ -1824,7 +1837,12 @@ fun SettingsScreen(active: Boolean = true) {
                         }
                         // 保存外部服务端时也从 WebView CookieJar 再同步一次，
                         // 确保登录后无需手动复制 Cookie。
-                        DouyinAuthStore.syncFromWebView(context)
+                        val cookieToSave = cookieInput.trim()
+                        if (cookieToSave.isNotBlank()) {
+                            DouyinAuthStore.saveAuthCookie(context, cookieToSave)
+                        } else {
+                            DouyinAuthStore.syncFromWebView(context)
+                        }
                         ServerConfigStore.save(
                             ServerConfigStore.Config(
                                 apiBase = apiBase,
@@ -1849,12 +1867,15 @@ fun SettingsScreen(active: Boolean = true) {
                             isTesting = true
                             testResult = "测试中…"
                             DouyinAuthStore.syncFromWebView(context)
+                            if (cookieInput.isBlank()) {
+                                cookieInput = DouyinAuthStore.getCookie(context).orEmpty()
+                            }
                             scope.launch {
                                 testResult = ServerApiClient.testConnection(
                                     apiBase = apiBaseInput,
                                     token = tokenInput,
                                     hmacKey = hmacInput,
-                                    douyinCookie = DouyinAuthStore.getCookie(context)
+                                    douyinCookie = cookieInput.trim().takeIf { it.isNotBlank() }
                                 )
                                 isTesting = false
                             }
