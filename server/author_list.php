@@ -84,7 +84,13 @@ function http_get($url, $headers, $timeout = 15) {
 
 // 预热拿 ttwid + 合并手动 cookie（预热结果缓存 30 分钟，避免每页翻页重复请求 douyin.com）
 function get_cookie_header() {
-    $manual = (defined('DOUYIN_COOKIE') && DOUYIN_COOKIE !== '') ? DOUYIN_COOKIE : '';
+    // App 登录页同步的 Cookie 优先于 config.php，便于客户端登录后直接批量解析。
+    // 请求已由 X-Token + X-Sign 鉴权，且只应通过 HTTPS 传输。
+    $clientCookie = isset($_SERVER['HTTP_X_DOUYIN_COOKIE'])
+        ? trim($_SERVER['HTTP_X_DOUYIN_COOKIE']) : '';
+    $manual = $clientCookie !== ''
+        ? $clientCookie
+        : ((defined('DOUYIN_COOKIE') && DOUYIN_COOKIE !== '') ? DOUYIN_COOKIE : '');
 
     // 缓存文件：sys_get_temp_dir()/dyparse_ttwid_cache
     $cacheFile = sys_get_temp_dir() . '/dyparse_ttwid_cache';
