@@ -1751,11 +1751,16 @@ fun SettingsScreen(active: Boolean = true) {
                 ) {
                     MiuixPrimaryButton(
                         onClick = {
+                            val cookieSynced = DouyinAuthStore.syncFromWebView(context)
                             ServerConfigStore.useInternal()
                             useInternalServer = true
                             serverConfigSummary = describeServerConfig()
                             showServerConfigDialog = false
-                            Toast.makeText(context, "已切换到内置服务器，安装即用", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(
+                                context,
+                                if (cookieSynced) "已切换到内置服务器，登录 Cookie 已同步" else "已切换到内置服务器，请先登录抖音",
+                                Toast.LENGTH_SHORT
+                            ).show()
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -1817,6 +1822,9 @@ fun SettingsScreen(active: Boolean = true) {
                             ).show()
                             return@MiuixPrimaryButton
                         }
+                        // 保存外部服务端时也从 WebView CookieJar 再同步一次，
+                        // 确保登录后无需手动复制 Cookie。
+                        DouyinAuthStore.syncFromWebView(context)
                         ServerConfigStore.save(
                             ServerConfigStore.Config(
                                 apiBase = apiBase,
@@ -1840,6 +1848,7 @@ fun SettingsScreen(active: Boolean = true) {
                             if (isTesting) return@MiuixOutlinedButton
                             isTesting = true
                             testResult = "测试中…"
+                            DouyinAuthStore.syncFromWebView(context)
                             scope.launch {
                                 testResult = ServerApiClient.testConnection(
                                     apiBase = apiBaseInput,
