@@ -571,7 +571,7 @@ fun MainScreen() {
         // 作者主页短链由首页识别后直接交给批量解析页，不再弹窗中转。
         val homepageLink = parserViewModel.homepageLinkDetected.value
         LaunchedEffect(homepageLink) {
-            homepageLink?.second?.let(onHomepageDetected)
+            homepageLink?.second?.let { url -> onHomepageDetected(url) }
         }
     }
 }
