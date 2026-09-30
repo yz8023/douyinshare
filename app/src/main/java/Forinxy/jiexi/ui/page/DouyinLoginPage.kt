@@ -108,7 +108,10 @@ fun DouyinLoginPage(onClose: () -> Unit) {
                 .padding(horizontal = 4.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onClose) {
+            IconButton(onClick = {
+                captureAndSaveCookie(webViewRef)
+                onClose()
+            }) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
                     contentDescription = "返回",
@@ -258,7 +261,11 @@ fun DouyinLoginPage(onClose: () -> Unit) {
                 Text("清除登录")
             }
             Button(
-                onClick = onClose,
+                onClick = {
+                    // 页面完成时再读取一次 Cookie，避免刚登录成功但尚未触发下一次 onPageFinished。
+                    captureAndSaveCookie(webViewRef)
+                    onClose()
+                },
                 modifier = Modifier.weight(1f)
             ) {
                 Text("完成")
