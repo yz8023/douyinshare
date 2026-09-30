@@ -86,8 +86,8 @@ object DouyinAuthStore {
     }
 
     fun hasAuthenticatedCookie(context: Context): Boolean {
-        // 解析已走服务器，本地 cookie 仅作兜底会话用，有值即视为可用
-        return hasCookie(context)
+        val cookie = getCookie(context) ?: return false
+        return looksAuthenticated(cookie)
     }
 
     fun looksAuthenticated(cookieHeader: String?): Boolean {
@@ -179,6 +179,8 @@ object DouyinCookieWebViewSync {
     private val cookieUrls = listOf(
         "https://www.douyin.com/",
         "https://douyin.com/",
+        "https://m.douyin.com/",
+        "https://creator.douyin.com/",
         "https://www.iesdouyin.com/"
     )
 

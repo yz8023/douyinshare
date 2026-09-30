@@ -77,10 +77,15 @@ fun DouyinLoginPage(onClose: () -> Unit) {
             return
         }
         val cookieHeader = DouyinCookieWebViewSync.readCurrentCookieHeader()
-        if (DouyinAuthStore.looksAuthenticated(cookieHeader)) {
-            if (DouyinAuthStore.saveAuthCookie(appContext, cookieHeader)) {
-                nickname = DouyinAuthStore.getLoginNickname(appContext)
-                statusText = "已捕获登录 Cookie，本地解析将使用登录态"
+        // 先保存完整 Cookie，再判断登录态。部分新账号的 WebView 首次只返回
+        // sid_tt / uid_tt，稍后才补齐 sessionid；不能因为第一次判断失败而丢弃 Cookie。
+        val normalized = DouyinAuthStore.normalizeCookieHeader(cookieHeader)
+        if (normalized.isNotBlank() && DouyinAuthStore.saveAuthCookie(appContext, normalized)) {
+            nickname = DouyinAuthStore.getLoginNickname(appContext)
+            statusText = if (DouyinAuthStore.looksAuthenticated(normalized)) {
+                "已捕获登录 Cookie，本地解析将使用登录态"
+            } else {
+                "已保存 Cookie，等待抖音补齐登录态"
             }
         }
     }

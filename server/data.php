@@ -857,7 +857,7 @@ class DyParser {
             'use_manual_when_mode_cookie' => (isset($_GET['mode']) && $_GET['mode'] === 'cookie') ? 'yes' : 'no',
             'douyin_cookie_defined' => defined('DOUYIN_COOKIE') ? 'yes' : 'no',
             'douyin_cookie_len' => strlen($manual),
-            'douyin_cookie_has_sessionid' => (strpos($manual, 'sessionid') !== false) ? 'yes' : 'no',
+            'douyin_cookie_has_sessionid' => preg_match('/(?:^|;\s*)(?:sessionid|sessionid_ss|sid_tt)=/i', $manual) ? 'yes' : 'no',
             'warm_ok' => ($warm !== '') ? 'yes' : 'no',
             'warm_cookie_preview' => substr($warm, 0, 60),
             'final_cookie_header_len' => strlen($cookieHeader),
