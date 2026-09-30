@@ -327,6 +327,7 @@ fun MainScreen() {
     val mainPagerState = rememberMainPagerState(pagerState)
     // 剪贴板/历史页「跳回首页解析」请求：非空时首页填充该文本并自动解析
     var pendingHomeParse by remember { mutableStateOf<String?>(null) }
+    var pendingBatchParse by remember { mutableStateOf<String?>(null) }
     val currentPage = pagerState.currentPage
     val currentRoute = navigationItems[mainPagerState.selectedPage].route
     val surfaceColor = MaterialTheme.colorScheme.background
@@ -400,7 +401,11 @@ fun MainScreen() {
                         externalParseInput = pendingHomeParse,
                         onExternalParseConsumed = { pendingHomeParse = null }
                     )
-                    1 -> BatchParsePage(parserViewModel)
+                    1 -> BatchParsePage(
+                        viewModel = parserViewModel,
+                        initialInput = pendingBatchParse,
+                        onInitialInputConsumed = { pendingBatchParse = null }
+                    )
                     2 -> ClipboardRecordsPage(
                         parserViewModel = parserViewModel,
                         onOpenInHome = { record ->
@@ -581,6 +586,7 @@ fun MainScreen() {
                 confirmButton = {
                     MiuixPrimaryButton(
                         onClick = {
+                            pendingBatchParse = homepageLink.second
                             parserViewModel.clearHomepageLinkDetected()
                             mainPagerState.animateToPage(1)
                         }
@@ -1751,18 +1757,24 @@ fun SettingsScreen(active: Boolean = true) {
                 ) {
                     MiuixPrimaryButton(
                         onClick = {
+                            val cookieSynced = DouyinAuthStore.syncFromWebView(context)
                             ServerConfigStore.useInternal()
                             useInternalServer = true
                             serverConfigSummary = describeServerConfig()
                             showServerConfigDialog = false
-                            Toast.makeText(context, "已切换到内置服务器，安装即用", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(
+                                context,
+                                if (cookieSynced) "已切换到内置服务器，登录 Cookie 已同步" else "已切换到内置服务器，请先登录抖音",
+                                Toast.LENGTH_SHORT
+                            ).show()
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text("使用内置服务器（无需部署，推荐）")
                     }
                     Text(
-                        "也可填写自己部署的服务端信息，三个值必须与服务端 config.php 完全一致。" +
+                        "也可填写自己部署的服务端信息，接口地址、Token、HMAC 密钥必须与服务端 config.php 完全一致。" +
+                            "App 内登录的 Cookie 会在鉴权请求中安全同步到你填写的服务端；也可继续在 config.php 固定配置。" +
                             "保存外部服务器后自动关闭内置开关；想切回可点上方按钮或设置页开关。",
                         style = MaterialTheme.typography.bodySmall
                     )
@@ -1816,6 +1828,9 @@ fun SettingsScreen(active: Boolean = true) {
                             ).show()
                             return@MiuixPrimaryButton
                         }
+                        // 保存外部服务端时也从 WebView CookieJar 再同步一次，
+                        // 确保登录后无需手动复制 Cookie。
+                        DouyinAuthStore.syncFromWebView(context)
                         ServerConfigStore.save(
                             ServerConfigStore.Config(
                                 apiBase = apiBase,
@@ -1839,11 +1854,13 @@ fun SettingsScreen(active: Boolean = true) {
                             if (isTesting) return@MiuixOutlinedButton
                             isTesting = true
                             testResult = "测试中…"
+                            DouyinAuthStore.syncFromWebView(context)
                             scope.launch {
                                 testResult = ServerApiClient.testConnection(
                                     apiBase = apiBaseInput,
                                     token = tokenInput,
-                                    hmacKey = hmacInput
+                                    hmacKey = hmacInput,
+                                    douyinCookie = DouyinAuthStore.getCookie(context)
                                 )
                                 isTesting = false
                             }
