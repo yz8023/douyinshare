@@ -399,12 +399,7 @@ fun MainScreen() {
                     0 -> ParserUI(
                         viewModel = parserViewModel,
                         externalParseInput = pendingHomeParse,
-                        onExternalParseConsumed = { pendingHomeParse = null },
-                        onHomepageDetected = { homepageUrl ->
-                            pendingBatchParse = homepageUrl
-                            parserViewModel.clearHomepageLinkDetected()
-                            mainPagerState.animateToPage(1)
-                        }
+                        onExternalParseConsumed = { pendingHomeParse = null }
                     )
                     1 -> BatchParsePage(
                         viewModel = parserViewModel,
@@ -571,7 +566,11 @@ fun MainScreen() {
         // 作者主页短链由首页识别后直接交给批量解析页，不再弹窗中转。
         val homepageLink = parserViewModel.homepageLinkDetected.value
         LaunchedEffect(homepageLink) {
-            homepageLink?.second?.let { url -> onHomepageDetected(url) }
+            homepageLink?.second?.let { url ->
+                pendingBatchParse = url
+                parserViewModel.clearHomepageLinkDetected()
+                mainPagerState.animateToPage(1)
+            }
         }
     }
 }
@@ -707,8 +706,7 @@ private fun LiquidGlassNavigationBar(
 fun ParserUI(
     viewModel: ParserViewModel,
     externalParseInput: String? = null,
-    onExternalParseConsumed: () -> Unit = {},
-    onHomepageDetected: (String) -> Unit = {}
+    onExternalParseConsumed: () -> Unit = {}
 ) {
     var text by rememberSaveable { mutableStateOf("") }
     val parseResult by viewModel.parseResult
