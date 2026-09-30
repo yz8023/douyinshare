@@ -105,11 +105,20 @@ jobs:
           test -f "$APK" || { echo "::error::没有产出 $APK"; exit 1; }
           ls -lh "$APK"
 
-      - name: Upload APK artifact
+      - name: Upload signed APK artifact
+        if: ${{ secrets.RELEASE_KEYSTORE_BASE64 != '' }}
         uses: actions/upload-artifact@v4
         with:
-          name: app-apk
-          path: ${{ secrets.RELEASE_KEYSTORE_BASE64 != '' && 'app/build/outputs/apk/release/*.apk' || 'app/build/outputs/apk/debug/*.apk' }}
+          name: app-release
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
+      - name: Upload debug APK artifact
+        if: ${{ secrets.RELEASE_KEYSTORE_BASE64 == '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
       - name: Publish GitHub Release
