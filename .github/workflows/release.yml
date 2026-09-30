@@ -60,16 +60,17 @@ jobs:
       - name: Run unit tests
         run: ./gradlew test --stacktrace
 
-      - name: Decode signing keystore
+      - name: Decode signing keystore when available
+        if: ${{ secrets.RELEASE_KEYSTORE_BASE64 != '' }}
         env:
           KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
         run: |
-          if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "::error::缺少 Secret RELEASE_KEYSTORE_BASE64，无法签名。请在 Settings → Secrets and variables → Actions 中配置（生成方法见 README）。"
-            exit 1
-          fi
           echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
           echo "RELEASE_STORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+
+      - name: Use unsigned debug fallback when no signing secret is configured
+        if: ${{ secrets.RELEASE_KEYSTORE_BASE64 == '' }}
+        run: echo "No release keystore configured; publishing the tested debug APK."
 
       - name: Check tag matches versionName
         if: startsWith(github.ref, 'refs/tags/')
@@ -80,26 +81,35 @@ jobs:
             echo "::warning::tag ${GITHUB_REF_NAME} 与 app/build.gradle.kts 的 versionName ($VERSION_NAME) 不一致，建议保持一致"
           fi
 
-      - name: Assemble release APK
+      - name: Assemble signed release APK
+        if: ${{ secrets.RELEASE_KEYSTORE_BASE64 != '' }}
         env:
           RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
           RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: ./gradlew assembleRelease --stacktrace
 
-      - name: Verify APK is signed
+      - name: Assemble debug APK fallback
+        if: ${{ secrets.RELEASE_KEYSTORE_BASE64 == '' }}
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Verify APK
         run: |
-          APK=app/build/outputs/apk/release/app-release.apk
+          if [ "${{ secrets.RELEASE_KEYSTORE_BASE64 != '' }}" = "true" ]; then
+            APK=app/build/outputs/apk/release/app-release.apk
+            APKSIGNER=$(find "$ANDROID_SDK_ROOT/build-tools" -name apksigner -type f | sort | tail -1)
+            "$APKSIGNER" verify --print-certs "$APK"
+          else
+            APK=app/build/outputs/apk/debug/app-debug.apk
+          fi
           test -f "$APK" || { echo "::error::没有产出 $APK"; exit 1; }
-          APKSIGNER=$(find "$ANDROID_SDK_ROOT/build-tools" -name apksigner -type f | sort | tail -1)
-          "$APKSIGNER" verify --print-certs "$APK"
           ls -lh "$APK"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: app-release
-          path: app/build/outputs/apk/release/*.apk
+          name: app-apk
+          path: ${{ secrets.RELEASE_KEYSTORE_BASE64 != '' && 'app/build/outputs/apk/release/*.apk' || 'app/build/outputs/apk/debug/*.apk' }}
           if-no-files-found: error
 
       - name: Publish GitHub Release
@@ -107,7 +117,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          APK=app/build/outputs/apk/release/app-release.apk
+          if [ "${{ secrets.RELEASE_KEYSTORE_BASE64 != '' }}" = "true" ]; then
+            APK=app/build/outputs/apk/release/app-release.apk
+          else
+            APK=app/build/outputs/apk/debug/app-debug.apk
+          fi
           NOTES="$RUNNER_TEMP/notes.md"
           DISCLAIMER_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/main/DISCLAIMER.md"
           SERVER_DOC_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/main/server/README.md"
@@ -125,6 +139,10 @@ jobs:
             echo "3. 点「测试连接」确认通过后即可使用。"
             echo ""
             echo "未配置服务端时，解析会提示「未配置服务器」。"
+            if [ "${{ secrets.RELEASE_KEYSTORE_BASE64 != '' }}" != "true" ]; then
+              echo ""
+              echo "> 本次仓库未配置发布签名密钥，附件为 CI 构建的 debug APK，仅用于测试安装。"
+            fi
             echo ""
             echo "## 安装"
             echo ""
