@@ -17,6 +17,7 @@ App 的解析逻辑完全在服务器执行，App 只调用本 API。
    - `API_HMAC_KEY`：与客户端一致（客户端读 `local.properties` 的 `SERVER_HMAC_KEY`）
    - `DOUYIN_COOKIE`：填入你自己的抖音登录 Cookie（浏览器登录抖音 → F12 → Application → Cookies → 复制整段）
    - `DOUYIN_COOKIE_ENABLED`：设为 `true`
+   - 如果在 App 内已登录，v4.13.1 起客户端会在经过 Token + HMAC 鉴权的请求中通过 `X-Douyin-Cookie` 同步 Cookie；服务端会优先使用这份 Cookie。请务必使用 HTTPS，且不要把请求头写入访问日志。
    - ⚠️ `config.php` 已被 `.gitignore` 忽略，**不要提交、不要公开**。它包含的登录 Cookie 等同于账号凭据。
 3. 测试：浏览器访问 `https://<你的域名>/api/data.php?diag4=1&url=<抖音链接>` 验证 a_bogus 签名生效（detail_status 应为 200、has_aweme_detail=yes）
 

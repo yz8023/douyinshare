@@ -146,9 +146,20 @@ private class AuthorCaptureBridge(
 }
 
 @Composable
-fun BatchParsePage(viewModel: ParserViewModel = viewModel()) {
+fun BatchParsePage(
+    viewModel: ParserViewModel = viewModel(),
+    initialInput: String? = null,
+    onInitialInputConsumed: () -> Unit = {}
+) {
     val context = LocalContext.current
     var input by rememberSaveable { mutableStateOf("") }
+
+    LaunchedEffect(initialInput) {
+        initialInput?.takeIf { it.isNotBlank() }?.let {
+            input = it
+            onInitialInputConsumed()
+        }
+    }
     var countInput by rememberSaveable { mutableStateOf("") }
     var positionInput by rememberSaveable { mutableStateOf("") }
     var captureRequest by remember { mutableStateOf<AuthorCaptureRequest?>(null) }

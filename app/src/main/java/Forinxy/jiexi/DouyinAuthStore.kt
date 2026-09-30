@@ -85,9 +85,21 @@ object DouyinAuthStore {
         return !getCookie(context).isNullOrBlank()
     }
 
+    /**
+     * 从 App 内置 WebView 当前 CookieJar 再同步一次。
+     * 用于用户在登录页完成登录后直接点击「使用内置服务器」的场景，
+     * 不依赖 onPageFinished 的时序。
+     */
+    fun syncFromWebView(context: Context): Boolean {
+        val current = DouyinCookieWebViewSync.readCurrentCookieHeader()
+        val normalized = normalizeCookieHeader(current)
+        if (normalized.isBlank()) return false
+        return saveAuthCookie(context, normalized)
+    }
+
     fun hasAuthenticatedCookie(context: Context): Boolean {
-        // 解析已走服务器，本地 cookie 仅作兜底会话用，有值即视为可用
-        return hasCookie(context)
+        val cookie = getCookie(context) ?: return false
+        return looksAuthenticated(cookie)
     }
 
     fun looksAuthenticated(cookieHeader: String?): Boolean {
@@ -179,6 +191,8 @@ object DouyinCookieWebViewSync {
     private val cookieUrls = listOf(
         "https://www.douyin.com/",
         "https://douyin.com/",
+        "https://m.douyin.com/",
+        "https://creator.douyin.com/",
         "https://www.iesdouyin.com/"
     )
 

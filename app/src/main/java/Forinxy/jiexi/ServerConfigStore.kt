@@ -43,6 +43,9 @@ object ServerConfigStore {
     private fun prefs(): SharedPreferences? =
         appContext?.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
 
+    /** 应用级上下文，仅供网络层读取用户主动配置的 Cookie，不暴露 Activity。 */
+    fun context(): Context? = appContext
+
     /** 构建时注入的默认值（来自 local.properties / 环境变量 / CI Secrets） */
     fun defaults(): Config = Config(
         apiBase = BuildConfig.SERVER_API_BASE,
