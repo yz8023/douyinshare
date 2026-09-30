@@ -1762,7 +1762,8 @@ fun SettingsScreen(active: Boolean = true) {
                         Text("使用内置服务器（无需部署，推荐）")
                     }
                     Text(
-                        "也可填写自己部署的服务端信息，三个值必须与服务端 config.php 完全一致。" +
+                        "也可填写自己部署的服务端信息，接口地址、Token、HMAC 密钥必须与服务端 config.php 完全一致。" +
+                            "App 内登录的 Cookie 会在鉴权请求中安全同步到你填写的服务端；也可继续在 config.php 固定配置。" +
                             "保存外部服务器后自动关闭内置开关；想切回可点上方按钮或设置页开关。",
                         style = MaterialTheme.typography.bodySmall
                     )
@@ -1843,7 +1844,8 @@ fun SettingsScreen(active: Boolean = true) {
                                 testResult = ServerApiClient.testConnection(
                                     apiBase = apiBaseInput,
                                     token = tokenInput,
-                                    hmacKey = hmacInput
+                                    hmacKey = hmacInput,
+                                    douyinCookie = DouyinAuthStore.getCookie(context)
                                 )
                                 isTesting = false
                             }
