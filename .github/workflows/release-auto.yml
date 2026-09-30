@@ -75,8 +75,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           APK=app/build/outputs/apk/release/app-release.apk
-          gh release create "${GITHUB_REF_NAME}" "$APK" \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "${GITHUB_REF_NAME}" \
-            --notes "修复 App 登录 Cookie 自动保存与同步问题。此 APK 为 CI 临时签名 Release 包；后续版本如需覆盖安装，请继续使用同一签名密钥。仅供测试使用。" \
-            --verify-tag
+          if gh release view "${GITHUB_REF_NAME}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" "$APK" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" "$APK" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "${GITHUB_REF_NAME}" \
+              --notes "修复主页解析跳转与 Cookie 自动同步问题。此 APK 为 CI 临时签名 Release 包；后续版本如需覆盖安装，请继续使用同一签名密钥。仅供测试使用。" \
+              --verify-tag
+          fi
