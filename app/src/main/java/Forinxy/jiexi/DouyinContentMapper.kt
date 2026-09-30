@@ -31,6 +31,29 @@ internal object DouyinContentMapper {
             .orEmpty()
     }
 
+    /**
+     * 将顶层平铺的 flat_images / flat_live_photos 按下标配对，缺实况时回退结构化字段
+     * （image.video 等）同下标的实况地址，避免单照片实况识别缺失。
+     */
+    fun buildFlatGalleryMedia(
+        item: Map<String, Any>,
+        flatImages: List<String>,
+        flatLivePhotosRaw: List<Any?>
+    ): List<GalleryMedia> {
+        val structured = extractGalleryMedia(item)
+        return flatImages.mapIndexed { index, url ->
+            val flatLive = (flatLivePhotosRaw.getOrNull(index) as? String)
+                ?.takeIf { it.isNotBlank() }
+            val structuredLive = structured.getOrNull(index)?.livePhotoRawUrl
+                ?.takeIf { it.isNotBlank() }
+            GalleryMedia(
+                index = index,
+                imageUrl = url,
+                livePhotoRawUrl = flatLive ?: structuredLive
+            )
+        }
+    }
+
     fun extractRawPlayUrl(item: Map<String, Any>): String? {
         val videoUri = item.dig<String>("video", "play_addr", "uri")
             ?: item.dig<String>("video", "bit_rate", 0, "play_addr", "uri")

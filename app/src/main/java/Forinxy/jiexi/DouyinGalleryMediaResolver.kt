@@ -10,9 +10,17 @@ object DouyinGalleryMediaResolver {
         val flatImages = item["flat_images"].takeIf { it is List<*> }
         if (flatImages != null) {
             val livePhotos = item["flat_live_photos"].takeIf { it is List<*> } as? List<*> ?: emptyList<Any?>()
+            val sourceLists = collectGallerySourceLists(item)
             return (flatImages as List<*>).mapIndexedNotNull { index, element ->
                 val imageUrl = (element as? String)?.takeIf { it.isNotBlank() }
-                val livePhotoUrl = (livePhotos.getOrNull(index) as? String)?.takeIf { it.isNotBlank() }
+                var livePhotoUrl = (livePhotos.getOrNull(index) as? String)?.takeIf { it.isNotBlank() }
+                // 单图实况：部分接口对单照片不返回 flat_live_photos，但结构化字段
+                // （images/image_post_info.images 等）同下标的 image.video 里带实况地址，
+                // 这里回退补齐，避免单图实况识别缺失。
+                if (livePhotoUrl.isNullOrBlank()) {
+                    val mediaItems = sourceLists.mapNotNull { it.getOrNull(index) }
+                    livePhotoUrl = pickBestLivePhotoUrl(mediaItems)
+                }
                 if (imageUrl == null && livePhotoUrl == null) {
                     null
                 } else {

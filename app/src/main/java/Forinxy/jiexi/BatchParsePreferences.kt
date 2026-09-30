@@ -7,23 +7,29 @@ object BatchParsePreferences {
     private const val KEY_WORK_INTERVAL_MS = "work_interval_ms"
     private const val KEY_AUTHOR_PAGE_INTERVAL_MS = "author_page_interval_ms"
     private const val KEY_CONSECUTIVE_FAILURE_STOP_COUNT = "consecutive_failure_stop_count"
+    private const val KEY_PARALLEL_COUNT = "parallel_count"
 
     const val DEFAULT_WORK_INTERVAL_MS = 800
     const val DEFAULT_AUTHOR_PAGE_INTERVAL_MS = 500
     const val DEFAULT_CONSECUTIVE_FAILURE_STOP_COUNT = 1
+    const val DEFAULT_PARALLEL_COUNT = 2
     const val RECOMMENDED_WORK_INTERVAL_MS = 800
     const val RECOMMENDED_AUTHOR_PAGE_INTERVAL_MS = 500
     const val RECOMMENDED_CONSECUTIVE_FAILURE_STOP_COUNT = 1
+    const val RECOMMENDED_PARALLEL_COUNT = 2
 
     private const val MIN_INTERVAL_MS = 0
     private const val MAX_INTERVAL_MS = 60_000
     private const val MIN_FAILURE_STOP_COUNT = 0
     private const val MAX_FAILURE_STOP_COUNT = 100
+    private const val MIN_PARALLEL_COUNT = 1
+    private const val MAX_PARALLEL_COUNT = 5
 
     data class Settings(
         val workIntervalMs: Int,
         val authorPageIntervalMs: Int,
-        val consecutiveFailureStopCount: Int
+        val consecutiveFailureStopCount: Int,
+        val parallelCount: Int
     )
 
     fun getSettings(context: Context): Settings {
@@ -42,6 +48,9 @@ object BatchParsePreferences {
                     KEY_CONSECUTIVE_FAILURE_STOP_COUNT,
                     DEFAULT_CONSECUTIVE_FAILURE_STOP_COUNT
                 )
+            ),
+            parallelCount = normalizeParallelCount(
+                prefs.getInt(KEY_PARALLEL_COUNT, DEFAULT_PARALLEL_COUNT)
             )
         )
     }
@@ -50,7 +59,8 @@ object BatchParsePreferences {
         context: Context,
         workIntervalMs: Int,
         authorPageIntervalMs: Int,
-        consecutiveFailureStopCount: Int
+        consecutiveFailureStopCount: Int,
+        parallelCount: Int = DEFAULT_PARALLEL_COUNT
     ) {
         context.applicationContext
             .getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -64,6 +74,7 @@ object BatchParsePreferences {
                 KEY_CONSECUTIVE_FAILURE_STOP_COUNT,
                 normalizeFailureStopCount(consecutiveFailureStopCount)
             )
+            .putInt(KEY_PARALLEL_COUNT, normalizeParallelCount(parallelCount))
             .apply()
     }
 
@@ -74,6 +85,7 @@ object BatchParsePreferences {
             .remove(KEY_WORK_INTERVAL_MS)
             .remove(KEY_AUTHOR_PAGE_INTERVAL_MS)
             .remove(KEY_CONSECUTIVE_FAILURE_STOP_COUNT)
+            .remove(KEY_PARALLEL_COUNT)
             .apply()
     }
 
@@ -83,5 +95,9 @@ object BatchParsePreferences {
 
     private fun normalizeFailureStopCount(value: Int): Int {
         return value.coerceIn(MIN_FAILURE_STOP_COUNT, MAX_FAILURE_STOP_COUNT)
+    }
+
+    private fun normalizeParallelCount(value: Int): Int {
+        return value.coerceIn(MIN_PARALLEL_COUNT, MAX_PARALLEL_COUNT)
     }
 }

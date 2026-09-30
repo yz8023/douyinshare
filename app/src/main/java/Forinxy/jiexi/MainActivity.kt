@@ -2,7 +2,9 @@ package Forinxy.jiexi
 
 import android.annotation.SuppressLint
 import android.Manifest
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.app.Activity
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -11,6 +13,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.View
+import android.view.accessibility.AccessibilityManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -64,6 +67,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.outlined.AccountCircle
+import androidx.compose.material.icons.outlined.AccessibilityNew
 import androidx.compose.material.icons.outlined.CleaningServices
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.ContentPaste
@@ -1320,6 +1324,7 @@ fun SettingsScreen(active: Boolean = true) {
     var showFeedbackDialog by rememberSaveable { mutableStateOf(false) }
     var showBatchGridDialog by rememberSaveable { mutableStateOf(false) }
     var showBatchParseSettingsDialog by rememberSaveable { mutableStateOf(false) }
+    var showLivePhotoModeDialog by rememberSaveable { mutableStateOf(false) }
     var showSaveSizeLimitDialog by rememberSaveable { mutableStateOf(false) }
     var showServerConfigDialog by rememberSaveable { mutableStateOf(false) }
     var showDouyinLoginDialog by rememberSaveable { mutableStateOf(false) }
@@ -1351,6 +1356,9 @@ fun SettingsScreen(active: Boolean = true) {
     var clipboardMonitorEnabled by rememberSaveable {
         mutableStateOf(ClipboardMonitorPreferences.isEnabled(appContext))
     }
+    var accessibilityEnabled by rememberSaveable {
+        mutableStateOf(isClipboardAccessibilityEnabled(appContext))
+    }
     var floatingWindowEnabled by rememberSaveable {
         mutableStateOf(FloatingWindowPreferences.isEnabled(appContext))
     }
@@ -1367,6 +1375,15 @@ fun SettingsScreen(active: Boolean = true) {
     }
     var consecutiveFailureStopCount by rememberSaveable {
         mutableStateOf(BatchParsePreferences.getSettings(appContext).consecutiveFailureStopCount)
+    }
+    var parallelCount by rememberSaveable {
+        mutableStateOf(BatchParsePreferences.getSettings(appContext).parallelCount)
+    }
+    var livePhotoSaveMode by rememberSaveable {
+        mutableStateOf(LivePhotoSavePreferences.getMode(appContext))
+    }
+    var livePhotoIncludeAudio by rememberSaveable {
+        mutableStateOf(LivePhotoSavePreferences.includeAudio(appContext))
     }
     var cacheSize by rememberSaveable { mutableStateOf("计算中...") }
     var isClearingCache by rememberSaveable { mutableStateOf(false) }
@@ -1385,14 +1402,17 @@ fun SettingsScreen(active: Boolean = true) {
             batchWorkIntervalMs = settings.workIntervalMs
             authorPageIntervalMs = settings.authorPageIntervalMs
             consecutiveFailureStopCount = settings.consecutiveFailureStopCount
+            parallelCount = settings.parallelCount
         }
     }
 
     // 每次进入设置页（pager 切换到该页）时重新计算缓存大小：
-    // 播放视频产生的预览缓存、清理缓存后的变化都会实时反映
+    // 播放视频产生的预览缓存、清理缓存后的变化都会实时反映；
+    // 无障碍服务状态由系统设置页控制，回到本页时同步刷新
     LaunchedEffect(active) {
         if (active) {
             cacheSize = getCacheSize(appContext)
+            accessibilityEnabled = isClipboardAccessibilityEnabled(appContext)
         }
     }
 
@@ -1481,6 +1501,9 @@ fun SettingsScreen(active: Boolean = true) {
         var failureStopInput by rememberSaveable(showBatchParseSettingsDialog) {
             mutableStateOf(consecutiveFailureStopCount.toString())
         }
+        var parallelCountInput by rememberSaveable(showBatchParseSettingsDialog) {
+            mutableStateOf(parallelCount.toString())
+        }
 
         MiuixAlertDialog(
             onDismissRequest = { showBatchParseSettingsDialog = false },
@@ -1526,6 +1549,19 @@ fun SettingsScreen(active: Boolean = true) {
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.fillMaxWidth()
                     )
+                    MiuixTextField(
+                        value = parallelCountInput,
+                        onValueChange = { parallelCountInput = it.filter(Char::isDigit) },
+                        label = { Text("多链接并发解析数") },
+                        supportingText = {
+                            Text(
+                                "默认 ${BatchParsePreferences.DEFAULT_PARALLEL_COUNT}，范围 1~5；仅影响多链接批量解析，请求节奏仍统一限流"
+                            )
+                        },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
             },
             confirmButton = {
@@ -1537,16 +1573,20 @@ fun SettingsScreen(active: Boolean = true) {
                             ?: BatchParsePreferences.DEFAULT_AUTHOR_PAGE_INTERVAL_MS
                         val failureStop = failureStopInput.toIntOrNull()
                             ?: BatchParsePreferences.DEFAULT_CONSECUTIVE_FAILURE_STOP_COUNT
+                        val parallel = parallelCountInput.toIntOrNull()
+                            ?: BatchParsePreferences.DEFAULT_PARALLEL_COUNT
                         BatchParsePreferences.saveSettings(
                             context = appContext,
                             workIntervalMs = workInterval,
                             authorPageIntervalMs = authorInterval,
-                            consecutiveFailureStopCount = failureStop
+                            consecutiveFailureStopCount = failureStop,
+                            parallelCount = parallel
                         )
                         BatchParsePreferences.getSettings(appContext).let { settings ->
                             batchWorkIntervalMs = settings.workIntervalMs
                             authorPageIntervalMs = settings.authorPageIntervalMs
                             consecutiveFailureStopCount = settings.consecutiveFailureStopCount
+                            parallelCount = settings.parallelCount
                         }
                         showBatchParseSettingsDialog = false
                     }
@@ -1563,6 +1603,7 @@ fun SettingsScreen(active: Boolean = true) {
                                 batchWorkIntervalMs = settings.workIntervalMs
                                 authorPageIntervalMs = settings.authorPageIntervalMs
                                 consecutiveFailureStopCount = settings.consecutiveFailureStopCount
+                                parallelCount = settings.parallelCount
                             }
                             showBatchParseSettingsDialog = false
                         }
@@ -1572,6 +1613,77 @@ fun SettingsScreen(active: Boolean = true) {
                     TextButton(onClick = { showBatchParseSettingsDialog = false }) {
                         Text("取消")
                     }
+                }
+            }
+        )
+    }
+
+    if (showLivePhotoModeDialog) {
+        MiuixAlertDialog(
+            onDismissRequest = { showLivePhotoModeDialog = false },
+            title = { Text("实况保存模式") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    LivePhotoSavePreferences.Mode.entries.forEach { mode ->
+                        MiuixOutlinedButton(
+                            onClick = {
+                                LivePhotoSavePreferences.setMode(appContext, mode)
+                                livePhotoSaveMode = mode
+                                showLivePhotoModeDialog = false
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                if (mode == livePhotoSaveMode) {
+                                    "${mode.label}（当前）"
+                                } else {
+                                    mode.label
+                                }
+                            )
+                        }
+                        if (mode.description.isNotBlank()) {
+                            Text(
+                                text = mode.description,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.padding(horizontal = 4.dp)
+                            )
+                        }
+                    }
+                    HorizontalDivider()
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                livePhotoIncludeAudio = !livePhotoIncludeAudio
+                                LivePhotoSavePreferences.setIncludeAudio(
+                                    appContext,
+                                    livePhotoIncludeAudio
+                                )
+                            }
+                            .padding(vertical = 2.dp)
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                if (livePhotoIncludeAudio) "带音频（当前）" else "不带音频",
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                            Text(
+                                "实况动态视频是否保留拍摄时的音频轨",
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.padding(top = 2.dp)
+                            )
+                        }
+                        Text(
+                            text = if (livePhotoIncludeAudio) "开" else "关",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showLivePhotoModeDialog = false }) {
+                    Text("关闭")
                 }
             }
         )
@@ -1851,6 +1963,32 @@ fun SettingsScreen(active: Boolean = true) {
             }
             item {
                 SettingsItem(
+                    icon = Icons.Outlined.AccessibilityNew,
+                    title = "无障碍剪贴板监听",
+                    subtitle = if (accessibilityEnabled) {
+                        "已开启：后台也可捕获复制内容并解析"
+                    } else {
+                        "未开启：后台复制无法自动解析，点按去系统开启"
+                    },
+                    onClick = {
+                        context.startActivity(
+                            Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                        )
+                        accessibilityEnabled = isClipboardAccessibilityEnabled(appContext)
+                    }
+                )
+            }
+            item {
+                SettingsItem(
+                    icon = Icons.Outlined.HighQuality,
+                    title = "实况保存模式",
+                    subtitle = "${livePhotoSaveMode.label}：${livePhotoSaveMode.description}，" +
+                        "音频${if (livePhotoIncludeAudio) "开" else "关"}",
+                    onClick = { showLivePhotoModeDialog = true }
+                )
+            }
+            item {
+                SettingsItem(
                     icon = Icons.Outlined.CleaningServices,
                     title = "清理缓存",
                     subtitle = if (isClearingCache) "清理中..." else cacheSize,
@@ -2106,6 +2244,19 @@ private fun requestNotificationPermissionIfNeeded(context: Context) {
             REQUEST_POST_NOTIFICATIONS
         )
     }
+}
+
+/** 检测本应用的「无障碍剪贴板监听」服务是否已在系统中开启 */
+private fun isClipboardAccessibilityEnabled(context: Context): Boolean {
+    val manager = context.getSystemService(Context.ACCESSIBILITY_SERVICE)
+        as? AccessibilityManager ?: return false
+    val expected = ComponentName(context, ClipboardAccessibilityService::class.java)
+    return manager
+        .getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+        .any {
+            val info = it.resolveInfo?.serviceInfo ?: return@any false
+            ComponentName(info.packageName, info.name) == expected
+        }
 }
 
 private const val REQUEST_POST_NOTIFICATIONS = 3001

@@ -125,4 +125,31 @@ class DouyinGalleryMediaResolverTest {
         assertEquals("https://example.com/clean_1.webp", media.imageUrl)
         assertTrue(media.livePhotoRawUrl.orEmpty().contains("watermark=0"))
     }
+
+    @Test
+    fun collectGalleryMediaFallsBackToStructuredLivePhotoForSinglePhotoWithoutFlatLivePhotos() {
+        // 单图实况：flat_images 存在但 flat_live_photos 缺失时，
+        // 应从同下标结构化字段 images[index].video 回退取出实况地址
+        val item = mapOf(
+            "flat_images" to listOf("https://example.com/single_photo.jpeg"),
+            "images" to listOf(
+                mapOf(
+                    "display_image" to mapOf("url_list" to listOf("https://example.com/single_photo.jpeg")),
+                    "video" to mapOf(
+                        "play_addr" to mapOf(
+                            "uri" to "v0d00singlelivephoto67890",
+                            "url_list" to listOf("https://example.com/watermarked-live.mp4")
+                        )
+                    )
+                )
+            )
+        )
+
+        val media = DouyinGalleryMediaResolver.collectGalleryMedia(item).single()
+
+        assertEquals("https://example.com/single_photo.jpeg", media.imageUrl)
+        assertTrue(media.hasLivePhoto)
+        assertTrue(media.livePhotoRawUrl.orEmpty().contains("video_id=v0d00singlelivephoto67890"))
+        assertTrue(media.livePhotoRawUrl.orEmpty().contains("watermark=0"))
+    }
 }

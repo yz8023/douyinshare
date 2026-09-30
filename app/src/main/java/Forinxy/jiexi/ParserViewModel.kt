@@ -146,6 +146,7 @@ class ParserViewModel(application: Application) : AndroidViewModel(application) 
         val index: Int = 0,
         val subPathOverride: String? = null,
         val extensionOverride: String? = null,
+        val stripAudio: Boolean = false,
         val resolveRequest: suspend () -> DouyinDownloadRequest?
     )
 
@@ -421,61 +422,76 @@ class ParserViewModel(application: Application) : AndroidViewModel(application) 
         _videoQualityOptions.value = null
 
         val requestToken = ++parseRequestToken
+        val parallelCount = BatchParsePreferences.getSettings(getApplication()).parallelCount
+            .coerceIn(1, 5)
+        val interval = workRequestIntervalMs()
         parseJob = viewModelScope.launch {
-            var succeeded = 0
-            var failed = 0
-            var lastTitle: String? = null
-            val failures = ArrayList<MultiLinkFailure>()
-            val successes = ArrayList<ParseResult.Success>()
-            val interval = workRequestIntervalMs()
-            for ((index, input) in inputs.withIndex()) {
-                if (requestToken != parseRequestToken) {
-                    throw CancellationException("Superseded by a newer parse request")
-                }
-                val result = try {
-                    val startTime = System.currentTimeMillis()
-                    var parsed = performParse(input, useCookie = true)
-                    if (parsed is ParseResult.Success) {
-                        parsed = parsed.copy(
-                            duration = (System.currentTimeMillis() - startTime) / 1000.0,
-                            lastPlayUrlUpdateTime = System.currentTimeMillis() / 1000
-                        )
+            // 有界并发：并行度可配置，但每个请求仍统一走全局限流器排队，
+            // 总体请求节奏不变，只是重叠网络等待/本地解析时间。
+            val semaphore = Semaphore(parallelCount)
+            val outcomes = arrayOfNulls<Any>(inputs.size)
+            val completed = AtomicInteger(0)
+            coroutineScope {
+                for ((index, input) in inputs.withIndex()) {
+                    launch {
+                        semaphore.withPermit {
+                            if (requestToken != parseRequestToken) {
+                                throw CancellationException("Superseded by a newer parse request")
+                            }
+                            DouyinRequestLimiter.acquire(interval)
+                            if (requestToken != parseRequestToken) {
+                                throw CancellationException("Superseded by a newer parse request")
+                            }
+                            val result = try {
+                                val startTime = System.currentTimeMillis()
+                                var parsed = performParse(input, useCookie = true)
+                                if (parsed is ParseResult.Success) {
+                                    parsed = parsed.copy(
+                                        duration = (System.currentTimeMillis() - startTime) / 1000.0,
+                                        lastPlayUrlUpdateTime = System.currentTimeMillis() / 1000
+                                    )
+                                }
+                                parsed
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                ParseResult.Error("\u89e3\u6790\u5931\u8d25: ${e.message}")
+                            }
+                            outcomes[index] = result
+                            val done = completed.incrementAndGet()
+                            if (requestToken == parseRequestToken) {
+                                _multiLinkParseState.value = buildMultiLinkRunningState(
+                                    total = inputs.size,
+                                    done = done,
+                                    outcomes = outcomes
+                                )
+                            }
+                        }
                     }
-                    parsed
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    ParseResult.Error("\u89e3\u6790\u5931\u8d25: ${e.message}")
-                }
-
-                if (result is ParseResult.Success) {
-                    succeeded += 1
-                    lastTitle = result.title
-                    successes.add(result)
-                    saveParseResult(result)
-                } else {
-                    failed += 1
-                    val errorMsg = (result as? ParseResult.Error)?.msg
-                        ?: "解析失败：未知错误"
-                    failures.add(MultiLinkFailure(input = input, msg = errorMsg))
-                }
-
-                if (requestToken == parseRequestToken) {
-                    _multiLinkParseState.value = MultiLinkParseState.Running(
-                        current = index + 1,
-                        total = inputs.size,
-                        succeeded = succeeded,
-                        failed = failed,
-                        lastTitle = lastTitle
-                    )
-                }
-
-                if (index < inputs.lastIndex && interval > 0L) {
-                    delay(DouyinRequestLimiter.jitteredIntervalMs(interval))
                 }
             }
 
             if (requestToken == parseRequestToken) {
+                var succeeded = 0
+                var failed = 0
+                var lastTitle: String? = null
+                val failures = ArrayList<MultiLinkFailure>()
+                val successes = ArrayList<ParseResult.Success>()
+                for ((index, input) in inputs.withIndex()) {
+                    val result = outcomes[index]
+                    if (result is ParseResult.Success) {
+                        succeeded += 1
+                        lastTitle = result.title
+                        successes.add(result)
+                        saveParseResult(result)
+                    } else {
+                        failed += 1
+                        val errorMsg = (result as? ParseResult.Error)?.msg
+                            ?: "\u89e3\u6790\u5931\u8d25\uff1a\u672a\u77e5\u9519\u8bef"
+                        failures.add(MultiLinkFailure(input = input, msg = errorMsg))
+                    }
+                }
+
                 _multiLinkParseState.value = MultiLinkParseState.Finished(
                     total = inputs.size,
                     succeeded = succeeded,
@@ -485,6 +501,33 @@ class ParserViewModel(application: Application) : AndroidViewModel(application) 
                 )
             }
         }
+    }
+
+    /** 按输入顺序统计已完成条目的运行进度（并行完成后顺序一致） */
+    private fun buildMultiLinkRunningState(
+        total: Int,
+        done: Int,
+        outcomes: Array<Any?>
+    ): MultiLinkParseState.Running {
+        var succeeded = 0
+        var failed = 0
+        var lastTitle: String? = null
+        for (i in 0 until done) {
+            val result = outcomes[i]
+            if (result is ParseResult.Success) {
+                succeeded += 1
+                lastTitle = result.title
+            } else {
+                failed += 1
+            }
+        }
+        return MultiLinkParseState.Running(
+            current = done,
+            total = total,
+            succeeded = succeeded,
+            failed = failed,
+            lastTitle = lastTitle
+        )
     }
 
     fun parseAuthorBatch(text: String, countInput: String, positionInput: String = "") {
@@ -2036,29 +2079,56 @@ private suspend fun performParse(input: String, useCookie: Boolean = false): Par
                         downloadLimiter.withPermit {
                             val downloadRequest = task.resolveRequest()
                             val success = if (downloadRequest != null) {
-                                saveFile(
-                                    context = context,
-                                    client = downloadClient,
-                                    url = downloadRequest.url,
-                                    headers = downloadRequest.headers,
-                                    mimeType = task.mimeType,
-                                    timestamp = task.timestamp,
-                                    index = task.index,
-                                    fileName = task.fileName,
-                                    subPathOverride = task.subPathOverride,
-                                    extensionOverride = task.extensionOverride
-                                ) { bytes, total ->
-                                    if (total > 0) {
-                                        progressMap[task.progressKey] =
-                                            (bytes.toFloat() / total).coerceIn(0f, 1f)
-                                        val aggregateProgress = (
-                                            completedCount.get() + progressMap.values.sum()
-                                            ) / totalMediaCount.toFloat()
-                                        withContext(Dispatchers.Main.immediate) {
-                                            _saveState.value = _saveState.value.copy(
-                                                current = completedCount.get(),
-                                                progress = aggregateProgress.coerceIn(0f, 1f)
-                                            )
+                                if (task.stripAudio) {
+                                    saveLivePhotoVideo(
+                                        context = context,
+                                        client = downloadClient,
+                                        url = downloadRequest.url,
+                                        headers = downloadRequest.headers,
+                                        mimeType = task.mimeType,
+                                        fileName = task.fileName,
+                                        subPath = task.subPathOverride ?: "dyparse/image",
+                                        includeAudio = false
+                                    ) { bytes, total ->
+                                        if (total > 0) {
+                                            progressMap[task.progressKey] =
+                                                (bytes.toFloat() / total).coerceIn(0f, 1f)
+                                            val aggregateProgress = (
+                                                completedCount.get() + progressMap.values.sum()
+                                                ) / totalMediaCount.toFloat()
+                                            withContext(Dispatchers.Main.immediate) {
+                                                _saveState.value = _saveState.value.copy(
+                                                    current = completedCount.get(),
+                                                    progress = aggregateProgress.coerceIn(0f, 1f)
+                                                )
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    saveFile(
+                                        context = context,
+                                        client = downloadClient,
+                                        url = downloadRequest.url,
+                                        headers = downloadRequest.headers,
+                                        mimeType = task.mimeType,
+                                        timestamp = task.timestamp,
+                                        index = task.index,
+                                        fileName = task.fileName,
+                                        subPathOverride = task.subPathOverride,
+                                        extensionOverride = task.extensionOverride
+                                    ) { bytes, total ->
+                                        if (total > 0) {
+                                            progressMap[task.progressKey] =
+                                                (bytes.toFloat() / total).coerceIn(0f, 1f)
+                                            val aggregateProgress = (
+                                                completedCount.get() + progressMap.values.sum()
+                                                ) / totalMediaCount.toFloat()
+                                            withContext(Dispatchers.Main.immediate) {
+                                                _saveState.value = _saveState.value.copy(
+                                                    current = completedCount.get(),
+                                                    progress = aggregateProgress.coerceIn(0f, 1f)
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -2118,55 +2188,115 @@ private suspend fun performParse(input: String, useCookie: Boolean = false): Par
             result.author,
             "image"
         )
-
-        val tasks = mutableListOf<MediaSaveTask>()
+        val mode = LivePhotoSavePreferences.getMode(getApplication())
+        val stripAudio = !LivePhotoSavePreferences.includeAudio(getApplication())
 
         // 实况配对：图片与配套动态视频用相同基名（xxx.01.jpg + xxx.01.mov），
         // 并保存到同一目录（dyparse/image），供支持 Live Photo 的相册识别。
         val livePairByIndex = livePhotoItems.associateBy { it.index }
+        // 仅有实况视频而无静态图的媒体
+        val liveOnlyItems = selectedGalleryMedia
+            .filter { it.imageUrl.isNullOrBlank() && it.hasLivePhoto }
 
-        imageItems.forEachIndexed { saveIndex, media ->
-            val imageUrl = media.imageUrl ?: return@forEachIndexed
-            val imageFileName = buildImageFileName(baseName, saveIndex, imageItems.size)
-            tasks += MediaSaveTask(
+        val tasks = mutableListOf<MediaSaveTask>()
+
+        fun imageTaskFor(media: GalleryMedia, saveIndex: Int, totalImages: Int): MediaSaveTask? {
+            val imageUrl = media.imageUrl ?: return null
+            return MediaSaveTask(
                 progressKey = "image_${result.videoId}_${media.index}_${result.parseTimestamp}",
-                fileName = imageFileName,
+                fileName = buildImageFileName(baseName, saveIndex, totalImages),
                 mimeType = "image/jpeg",
                 timestamp = result.timestamp,
                 index = media.index,
                 resolveRequest = { buildDirectMediaDownloadRequest(imageUrl) }
             )
+        }
 
-            // 该图片是实况：同一个任务序列里把配套视频也按相同基名保存为 .mov
-            val livePhotoUrl = livePairByIndex[media.index]?.livePhotoRawUrl
-            if (!livePhotoUrl.isNullOrBlank()) {
-                tasks += MediaSaveTask(
+        fun liveTaskFor(
+            media: GalleryMedia,
+            fileName: String,
+            pairNaming: Boolean
+        ): MediaSaveTask? {
+            val livePhotoUrl = media.livePhotoRawUrl?.takeIf { it.isNotBlank() } ?: return null
+            return if (pairNaming) {
+                // 实况配对视频：与图片同基名保存为 .mov，供相册识别
+                MediaSaveTask(
                     progressKey = "live_${result.videoId}_${media.index}_${result.parseTimestamp}",
-                    fileName = imageFileName,
+                    fileName = fileName,
                     mimeType = "video/quicktime",
                     timestamp = result.timestamp,
                     index = media.index,
                     subPathOverride = "dyparse/image",
                     extensionOverride = "mov",
+                    stripAudio = stripAudio,
                     resolveRequest = { buildDirectMediaDownloadRequest(livePhotoUrl) }
                 )
-                return@forEachIndexed
+            } else {
+                // 仅实况视频：默认目录，保存为 .mp4
+                MediaSaveTask(
+                    progressKey = "live_only_${result.videoId}_${media.index}_${result.parseTimestamp}",
+                    fileName = fileName,
+                    mimeType = "video/mp4",
+                    timestamp = result.timestamp,
+                    index = media.index,
+                    stripAudio = stripAudio,
+                    resolveRequest = { buildDirectMediaDownloadRequest(livePhotoUrl) }
+                )
             }
         }
 
-        // 仅有实况视频而无静态图的媒体单独保存（命名方式不变）
-        val savedLiveIndexes = selectedGalleryMedia
-            .filter { it.imageUrl.isNullOrBlank() && it.hasLivePhoto }
-        savedLiveIndexes.forEachIndexed { saveIndex, media ->
-            val livePhotoUrl = media.livePhotoRawUrl ?: return@forEachIndexed
-            tasks += MediaSaveTask(
-                progressKey = "live_only_${result.videoId}_${media.index}_${result.parseTimestamp}",
-                fileName = buildLivePhotoFileName(baseName, saveIndex, savedLiveIndexes.size),
-                mimeType = "video/mp4",
-                timestamp = result.timestamp,
-                index = media.index,
-                resolveRequest = { buildDirectMediaDownloadRequest(livePhotoUrl) }
-            )
+        when (mode) {
+            // 图片格式：仅保存静态图片，不保存配套动态视频
+            LivePhotoSavePreferences.Mode.IMAGE_ONLY -> {
+                imageItems.forEachIndexed { saveIndex, media ->
+                    imageTaskFor(media, saveIndex, imageItems.size)?.let { tasks += it }
+                }
+            }
+
+            // 视频格式：仅保存实况动态视频
+            LivePhotoSavePreferences.Mode.VIDEO_ONLY -> {
+                imageItems.forEachIndexed { saveIndex, media ->
+                    val pairedLive = livePairByIndex[media.index]
+                    if (pairedLive != null) {
+                        liveTaskFor(
+                            pairedLive,
+                            buildLivePhotoFileName(baseName, saveIndex, imageItems.size),
+                            pairNaming = false
+                        )?.let { tasks += it }
+                    }
+                }
+                liveOnlyItems.forEachIndexed { saveIndex, media ->
+                    liveTaskFor(
+                        media,
+                        buildLivePhotoFileName(baseName, saveIndex, liveOnlyItems.size),
+                        pairNaming = false
+                    )?.let { tasks += it }
+                }
+            }
+
+            // 合并为实况（默认）：静态图 + 配对动态视频按相同基名保存
+            LivePhotoSavePreferences.Mode.PAIR -> {
+                imageItems.forEachIndexed { saveIndex, media ->
+                    imageTaskFor(media, saveIndex, imageItems.size)?.let { tasks += it }
+
+                    // 该图片是实况：同一个任务序列里把配套视频也按相同基名保存为 .mov
+                    val pairedLive = livePairByIndex[media.index]
+                    if (pairedLive != null) {
+                        liveTaskFor(
+                            pairedLive,
+                            buildImageFileName(baseName, saveIndex, imageItems.size),
+                            pairNaming = true
+                        )?.let { tasks += it }
+                    }
+                }
+                liveOnlyItems.forEachIndexed { saveIndex, media ->
+                    liveTaskFor(
+                        media,
+                        buildLivePhotoFileName(baseName, saveIndex, liveOnlyItems.size),
+                        pairNaming = false
+                    )?.let { tasks += it }
+                }
+            }
         }
 
         return tasks
@@ -2235,29 +2365,56 @@ private suspend fun performParse(input: String, useCookie: Boolean = false): Par
                         limiter.withPermit {
                             val downloadRequest = task.resolveRequest()
                             val success = if (downloadRequest != null) {
-                                saveFile(
-                                    context = context,
-                                    client = downloadClient,
-                                    url = downloadRequest.url,
-                                    headers = downloadRequest.headers,
-                                    mimeType = task.mimeType,
-                                    timestamp = task.timestamp,
-                                    index = task.index,
-                                    fileName = task.fileName,
-                                    subPathOverride = task.subPathOverride,
-                                    extensionOverride = task.extensionOverride
-                                ) { bytes, total ->
-                                    if (total > 0) {
-                                        progressMap[task.progressKey] =
-                                            (bytes.toFloat() / total).coerceIn(0f, 1f)
-                                        val aggregateProgress = (
-                                            completedCount.get() + progressMap.values.sum()
-                                            ) / tasks.size.toFloat()
-                                        withContext(Dispatchers.Main.immediate) {
-                                            _saveState.value = _saveState.value.copy(
-                                                current = completedCount.get(),
-                                                progress = aggregateProgress.coerceIn(0f, 1f)
-                                            )
+                                if (task.stripAudio) {
+                                    saveLivePhotoVideo(
+                                        context = context,
+                                        client = downloadClient,
+                                        url = downloadRequest.url,
+                                        headers = downloadRequest.headers,
+                                        mimeType = task.mimeType,
+                                        fileName = task.fileName,
+                                        subPath = task.subPathOverride ?: "dyparse/image",
+                                        includeAudio = false
+                                    ) { bytes, total ->
+                                        if (total > 0) {
+                                            progressMap[task.progressKey] =
+                                                (bytes.toFloat() / total).coerceIn(0f, 1f)
+                                            val aggregateProgress = (
+                                                completedCount.get() + progressMap.values.sum()
+                                                ) / tasks.size.toFloat()
+                                            withContext(Dispatchers.Main.immediate) {
+                                                _saveState.value = _saveState.value.copy(
+                                                    current = completedCount.get(),
+                                                    progress = aggregateProgress.coerceIn(0f, 1f)
+                                                )
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    saveFile(
+                                        context = context,
+                                        client = downloadClient,
+                                        url = downloadRequest.url,
+                                        headers = downloadRequest.headers,
+                                        mimeType = task.mimeType,
+                                        timestamp = task.timestamp,
+                                        index = task.index,
+                                        fileName = task.fileName,
+                                        subPathOverride = task.subPathOverride,
+                                        extensionOverride = task.extensionOverride
+                                    ) { bytes, total ->
+                                        if (total > 0) {
+                                            progressMap[task.progressKey] =
+                                                (bytes.toFloat() / total).coerceIn(0f, 1f)
+                                            val aggregateProgress = (
+                                                completedCount.get() + progressMap.values.sum()
+                                                ) / tasks.size.toFloat()
+                                            withContext(Dispatchers.Main.immediate) {
+                                                _saveState.value = _saveState.value.copy(
+                                                    current = completedCount.get(),
+                                                    progress = aggregateProgress.coerceIn(0f, 1f)
+                                                )
+                                            }
                                         }
                                     }
                                 }

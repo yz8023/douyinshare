@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">dyparse</string>
+    <string name="accessibility_service_label">无障碍剪贴板监听</string>
+    <string name="accessibility_service_description">自动监听其他应用中的复制操作，捕获抖音分享链接并解析。开启后应用处于后台时也能正常工作。</string>
 </resources>

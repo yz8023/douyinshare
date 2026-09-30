@@ -17,6 +17,13 @@ import android.view.MotionEvent
 import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.view.animation.OvershootInterpolator
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.math.hypot
 
 /**
@@ -74,6 +81,8 @@ class FloatingBallService : Service() {
     private var ballView: FloatingBallView? = null
     private var layoutParams: WindowManager.LayoutParams? = null
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     private var screenWidth = 0
     private var screenHeight = 0
     private var ballSizePx = 0
@@ -125,6 +134,7 @@ class FloatingBallService : Service() {
     override fun onDestroy() {
         running = false
         instance = null
+        scope.cancel()
         ballView?.let { view ->
             view.stopBreathing()
             runCatching { windowManager.removeView(view) }
@@ -243,6 +253,32 @@ class FloatingBallService : Service() {
             )
         }
         runCatching { startActivity(intent) }
+        // 点按后 App 回到前台获得焦点，延迟一小段等焦点生效后直接读取并解析剪贴板，
+        // 不依赖 Activity 生命周期回调，避免悬浮球点击偶尔不触发前台补读的问题。
+        scope.launch {
+            delay(500L)
+            try {
+                ClipboardAutoParse.capture(this@FloatingBallService)
+                    ?.let { notifyText -> postCaptureNotification(notifyText) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+            }
+        }
+    }
+
+    /** 悬浮球通道解析结果的轻提醒（剪贴板监听通道已有前台通知，这里用独立小通知避免混淆） */
+    private fun postCaptureNotification(text: String) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val builder = Notification.Builder(this, CHANNEL_ID)
+            .setContentTitle("已解析剪贴板")
+            .setContentText(text)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setAutoCancel(true)
+        runCatching {
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+                .notify(1004, builder.build())
+        }
     }
 
     private fun applyAlpha(alpha: Float) {

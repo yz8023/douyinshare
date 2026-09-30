@@ -501,76 +501,123 @@ internal class BuiltInParser(context: Context) : PlatformParser {
     // ========== 图集提取 ==========
 
     private fun buildGallery(item: JsonObject): List<JsonObject> {
-        val result = mutableListOf<JsonObject>()
-        val imageSources = listOfNotNull(
-            item.asObject("image_post_info")?.asArray("images"),
-            item.asArray("image_list"),
-            item.asArray("images"),
-            item.asArray("image_infos"),
-            item.asArray("original_images")
-        ).firstOrNull { it.size() > 0 } ?: return result
+        // 顶层平铺结构（flat_images + flat_live_photos 按下标对应）：homepage 单条
+        // detail/分享页的图集与单图都可能是这种结构，先处理它。
+        val flatImages = item.asArray("flat_images")
+        if (flatImages != null && flatImages.size() > 0) {
+            val flatLivePhotos = item.asArray("flat_live_photos")
+            val structured = imageSourceList(item)
+            val result = mutableListOf<JsonObject>()
+            var idx = 0
+            for (index in 0 until flatImages.size()) {
+                val el = flatImages[index]
+                if (!el.isJsonPrimitive || !el.asJsonPrimitive.isString) continue
+                val imageUrl = el.asJsonPrimitive.asString
+                // 单图实况：部分接口对单照片不返回 flat_live_photos，
+                // 回退到结构化字段同下标的 image.video 取实况地址
+                var livePhoto: String? = null
+                if (flatLivePhotos != null && index < flatLivePhotos.size()) {
+                    val lpEl = flatLivePhotos[index]
+                    if (lpEl.isJsonPrimitive && lpEl.asJsonPrimitive.isString) {
+                        livePhoto = lpEl.asJsonPrimitive.asString.takeIf { it.isNotBlank() }
+                    }
+                }
+                if (livePhoto.isNullOrBlank() && index < structured.size()) {
+                    val structuredImage = structured[index].takeIf { it.isJsonObject }?.asJsonObject
+                    if (structuredImage != null) {
+                        livePhoto = extractLivePhotoFromImageObject(structuredImage)
+                    }
+                }
+                result.add(JsonObject().also {
+                    it.addProperty("index", idx)
+                    it.addProperty("image_url", imageUrl)
+                    it.addProperty("live_photo_raw_url", livePhoto)
+                    it.addProperty("has_live_photo", livePhoto != null)
+                })
+                idx++
+            }
+            return result
+        }
 
+        val imageSources = imageSourceList(item)
+        if (imageSources.size() == 0) return emptyList()
+
+        val result = mutableListOf<JsonObject>()
         var idx = 0
         for (el in imageSources) {
             if (!el.isJsonObject) continue
             val img = el.asJsonObject
             val imageUrl = img.asArray("url_list")?.firstOrNull { !it.isJsonNull }?.asString
                 ?: img.asArray("download_url_list")?.firstOrNull { !it.isJsonNull }?.asString
-
-            // 实况图：从图集项的 video 字段提取实况视频地址
-            var livePhoto: String? = null
-            val liveVideo = img.asObject("video")
-            if (liveVideo != null) {
-                val playUri = liveVideo.asObject("play_addr")?.asString("uri")
-                if (!playUri.isNullOrBlank()) {
-                    livePhoto = when {
-                        playUri.startsWith("http") -> playUri
-                        !playUri.contains("mp3") ->
-                            "http://www.iesdouyin.com/aweme/v1/play/?video_id=$playUri&ratio=1080p&line=0"
-                        else -> playUri
-                    }
-                }
-                if (livePhoto == null) {
-                    for (key in listOf("play_addr_h264", "play_addr", "play_addr_lowbr", "download_addr")) {
-                        val addr = liveVideo.asObject(key) ?: continue
-                        val urlListFirst = addr.asArray("url_list")?.firstOrNull { !it.isJsonNull }?.asString
-                        if (!urlListFirst.isNullOrBlank()) { livePhoto = urlListFirst; break }
-                        val uri2 = addr.asString("uri")
-                        if (!uri2.isNullOrBlank()) {
-                            livePhoto = when {
-                                uri2.startsWith("http") -> uri2
-                                !uri2.contains("mp3") ->
-                                    "http://www.iesdouyin.com/aweme/v1/play/?video_id=$uri2&ratio=1080p&line=0"
-                                else -> uri2
-                            }
-                            break
-                        }
-                    }
-                }
-            }
-            if (livePhoto == null) {
-                val lv = img.asObject("video_play_addr")?.asString("uri")
-                if (!lv.isNullOrBlank()) {
-                    livePhoto = when {
-                        lv.startsWith("http") -> lv
-                        !lv.contains("mp3") ->
-                            "http://www.iesdouyin.com/aweme/v1/play/?video_id=$lv&ratio=1080p&line=0"
-                        else -> lv
-                    }
-                }
-            }
+            val livePhoto = extractLivePhotoFromImageObject(img)
 
             if (imageUrl != null || livePhoto != null) {
-                val entry = JsonObject()
-                entry.addProperty("index", idx)
-                entry.addProperty("image_url", imageUrl)
-                entry.addProperty("live_photo_raw_url", livePhoto)
-                entry.addProperty("has_live_photo", livePhoto != null)
-                result.add(entry)
+                result.add(JsonObject().also {
+                    it.addProperty("index", idx)
+                    it.addProperty("image_url", imageUrl)
+                    it.addProperty("live_photo_raw_url", livePhoto)
+                    it.addProperty("has_live_photo", livePhoto != null)
+                })
                 idx++
             }
         }
         return result
+    }
+
+    private fun imageSourceList(item: JsonObject): JsonArray {
+        return listOfNotNull(
+            item.asObject("image_post_info")?.asArray("images"),
+            item.asArray("image_list"),
+            item.asArray("images"),
+            item.asArray("image_infos"),
+            item.asArray("original_images")
+        ).firstOrNull { it.size() > 0 } ?: JsonArray()
+    }
+
+    /** 从单个图集项提取实况视频地址（video / video_play_addr 字段） */
+    private fun extractLivePhotoFromImageObject(img: JsonObject): String? {
+        var livePhoto: String? = null
+        val liveVideo = img.asObject("video")
+        if (liveVideo != null) {
+            val playUri = liveVideo.asObject("play_addr")?.asString("uri")
+            if (!playUri.isNullOrBlank()) {
+                livePhoto = when {
+                    playUri.startsWith("http") -> playUri
+                    !playUri.contains("mp3") ->
+                        "http://www.iesdouyin.com/aweme/v1/play/?video_id=$playUri&ratio=1080p&line=0"
+                    else -> playUri
+                }
+            }
+            if (livePhoto == null) {
+                for (key in listOf("play_addr_h264", "play_addr", "play_addr_lowbr", "download_addr")) {
+                    val addr = liveVideo.asObject(key) ?: continue
+                    val urlListFirst = addr.asArray("url_list")?.firstOrNull { !it.isJsonNull }?.asString
+                    if (!urlListFirst.isNullOrBlank()) { livePhoto = urlListFirst; break }
+                    val uri2 = addr.asString("uri")
+                    if (!uri2.isNullOrBlank()) {
+                        livePhoto = when {
+                            uri2.startsWith("http") -> uri2
+                            !uri2.contains("mp3") ->
+                                "http://www.iesdouyin.com/aweme/v1/play/?video_id=$uri2&ratio=1080p&line=0"
+                            else -> uri2
+                        }
+                        break
+                    }
+                }
+            }
+        }
+        if (livePhoto == null) {
+            val lv = img.asObject("video_play_addr")?.asString("uri")
+            if (!lv.isNullOrBlank()) {
+                livePhoto = when {
+                    lv.startsWith("http") -> lv
+                    !lv.contains("mp3") ->
+                        "http://www.iesdouyin.com/aweme/v1/play/?video_id=$lv&ratio=1080p&line=0"
+                    else -> lv
+                }
+            }
+        }
+        return livePhoto
     }
 
     // ========== 画质列表（对齐 collect_quality_list） ==========

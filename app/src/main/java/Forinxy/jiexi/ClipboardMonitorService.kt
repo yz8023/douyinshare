@@ -11,10 +11,6 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
-import Forinxy.jiexi.data.local.ClipboardRecordEntity
-import Forinxy.jiexi.data.local.HistoryDatabase
-import Forinxy.jiexi.data.ParseResult
-import com.google.gson.Gson
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -41,7 +37,7 @@ class ClipboardMonitorService : Service() {
         private const val POLL_INTERVAL_MS = 3000L
 
         /** 去重窗口：同一段（哈希相同）内容在此窗口内不重复入账/解析 */
-        private const val DEDUPE_WINDOW_MS = 5 * 60 * 1000L
+        const val DEDUPE_WINDOW_MS = 5 * 60 * 1000L
 
         const val STATUS_PENDING = "PENDING"
         const val STATUS_DONE = "DONE"
@@ -91,12 +87,6 @@ class ClipboardMonitorService : Service() {
 
     /** 前台时监听剪贴板变更，即时触发解析（相比 3s 轮询更灵敏） */
     private var clipboardListener: ClipboardManager.OnPrimaryClipChangedListener? = null
-
-    /** 完整解析结果序列化（卡片详情复用） */
-    private val gson = Gson()
-
-    /** 内容哈希 → 首次处理时间，用于窗口去重 */
-    private val seenTimes = HashMap<String, Long>()
 
     private var lastNotifyText = "正在监听剪贴板..."
     private var monitoring = false
@@ -205,70 +195,16 @@ class ClipboardMonitorService : Service() {
     }
 
     private suspend fun pollClipboardOnce() {
-        val clip = runCatching { clipboardManager.primaryClip }.getOrNull() ?: return
-        if (clip.itemCount == 0) return
-        val text = runCatching { clip.getItemAt(0).coerceToText(this).toString() }.getOrNull() ?: return
-        if (!ClipboardShareContent.isDouyinShare(text)) return
-        val parseInput = ClipboardShareContent.extractParseInput(text) ?: return
-        val hash = ClipboardShareContent.contentHash(text)
-        if (recentlyHandled(hash)) return
-
-        val db = HistoryDatabase.get(this)
-        val since = System.currentTimeMillis() - DEDUPE_WINDOW_MS
-        if (db.historyDao().countClipboardRecordsSince(hash, since) > 0) return
-
-        val id = db.historyDao().insertClipboardRecord(
-            ClipboardRecordEntity(
-                content = text,
-                contentHash = hash,
-                copiedAt = System.currentTimeMillis(),
-                status = STATUS_PENDING
-            )
-        )
-
-        val result = try {
-            ClipboardParseEngine.parse(this, parseInput)
+        val notifyText = try {
+            ClipboardAutoParse.capture(this)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            ParseResult.Error("解析失败(${e.message})")
-        }
-
-        val success = result is ParseResult.Success
-        val successItem = result as? ParseResult.Success
-        db.historyDao().updateClipboardRecord(
-            id = id,
-            status = if (success) STATUS_DONE else STATUS_FAILED,
-            videoId = successItem?.videoId,
-            title = successItem?.title,
-            author = successItem?.author,
-            type = successItem?.type,
-            cover = successItem?.cover,
-            payloadJson = successItem?.let { runCatching { gson.toJson(it) }.getOrNull() },
-            parseError = (result as? ParseResult.Error)?.msg,
-            parsedAt = if (success) System.currentTimeMillis() else null
-        )
-
-        val notifyText = if (success) {
-            val title = (result as ParseResult.Success).title ?: "未知"
-            "已解析：$title"
-        } else {
-            "解析失败：${(result as? ParseResult.Error)?.msg ?: "未知错误"}"
-        }
+            null
+        } ?: return
         lastNotifyText = notifyText
         if (running) {
             startForegroundCompat(buildNotification(notifyText))
         }
-    }
-
-    /** 窗口内是否已处理过同一内容 */
-    private fun recentlyHandled(hash: String): Boolean {
-        val now = System.currentTimeMillis()
-        val cutoff = now - DEDUPE_WINDOW_MS
-        val iterator = seenTimes.entries.iterator()
-        while (iterator.hasNext()) {
-            if (iterator.next().value < cutoff) iterator.remove()
-        }
-        return seenTimes.put(hash, now) != null
     }
 }

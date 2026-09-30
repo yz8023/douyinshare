@@ -5,7 +5,6 @@ import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import Forinxy.jiexi.data.BatchAuthorParseSummary
-import Forinxy.jiexi.data.GalleryMedia
 import Forinxy.jiexi.data.HistoryRepository
 import Forinxy.jiexi.data.ParseResult
 import Forinxy.jiexi.data.totalMediaAssetCount
@@ -1028,14 +1027,7 @@ class AuthorBatchManager(
         val flatImages = item.dig<List<*>>("flat_images")?.mapNotNull { it as? String }.orEmpty()
         val flatLivePhotosRaw = item.dig<List<*>>("flat_live_photos").orEmpty()
         val galleryMedia = if (flatImages.isNotEmpty()) {
-            flatImages.mapIndexed { index, url ->
-                GalleryMedia(
-                    index = index,
-                    imageUrl = url,
-                    livePhotoRawUrl = (flatLivePhotosRaw.getOrNull(index) as? String)
-                        ?.takeIf { it.isNotBlank() }
-                )
-            }
+            DouyinContentMapper.buildFlatGalleryMedia(item, flatImages, flatLivePhotosRaw)
         } else {
             null
         }
@@ -1344,14 +1336,7 @@ class AuthorBatchManager(
         val flatImages = item.dig<List<*>>("flat_images")?.mapNotNull { it as? String }.orEmpty()
         val flatLivePhotosRaw = item.dig<List<*>>("flat_live_photos").orEmpty()
         val galleryMedia = if (flatImages.isNotEmpty()) {
-            flatImages.mapIndexed { index, url ->
-                GalleryMedia(
-                    index = index,
-                    imageUrl = url,
-                    livePhotoRawUrl = (flatLivePhotosRaw.getOrNull(index) as? String)
-                        ?.takeIf { it.isNotBlank() }
-                )
-            }
+            DouyinContentMapper.buildFlatGalleryMedia(item, flatImages, flatLivePhotosRaw)
         } else {
             DouyinContentMapper.extractGalleryMedia(item)
         }

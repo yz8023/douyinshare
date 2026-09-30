@@ -134,6 +134,135 @@ suspend fun saveFile(
     false
 }
 
+/**
+ * 保存实况动态视频：下载到缓存 → 按 [includeAudio] 决定是否剥离音频轨 → 落盘到 Downloads。
+ * 剥离音频失败时自动回退保留原文件（带音频），保证保存不因剥离异常而失败。
+ */
+suspend fun saveLivePhotoVideo(
+    context: Context,
+    client: OkHttpClient,
+    url: String,
+    headers: Map<String, String> = emptyMap(),
+    mimeType: String,
+    fileName: String? = null,
+    subPath: String = "dyparse/video",
+    includeAudio: Boolean = true,
+    onProgress: suspend (Long, Long) -> Unit = { _, _ -> }
+): Boolean = withContext(Dispatchers.IO) {
+    val uniqueSuffix = url.hashCode().toString().replace("-", "")
+    val finalFileName = ensureExtension(
+        fileName?.takeIf { it.isNotBlank() } ?: "dy_live_${System.currentTimeMillis()}_$uniqueSuffix.mov",
+        if (mimeType == "video/quicktime") "mov" else "mp4"
+    )
+
+    var cacheFile: File? = null
+    var strippedFile: File? = null
+    try {
+        cacheFile = downloadToCacheFile(context, client, url, headers, onProgress)
+        if (cacheFile == null) {
+            return@withContext false
+        }
+
+        val fileToSave = if (includeAudio) {
+            cacheFile
+        } else {
+            strippedFile = File(
+                context.cacheDir,
+                "stripped_${System.currentTimeMillis()}_$uniqueSuffix.mp4"
+            )
+            if (LivePhotoAudioStripper.stripAudioTrack(
+                    sourcePath = cacheFile.absolutePath,
+                    targetPath = strippedFile.absolutePath
+                ) && strippedFile.length() > 0L
+            ) {
+                strippedFile
+            } else {
+                // 剥离失败：回退原文件（保留音频），仅告警不阻断保存
+                Log.w("SaveError", "live photo audio strip failed, fallback to original: $url")
+                cacheFile
+            }
+        }
+
+        val contentLength = fileToSave.length()
+        val inputStream = BufferedInputStream(fileToSave.inputStream(), STREAM_BUFFER_SIZE)
+        inputStream.use { stream ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                saveToDownloadsMediaStore(
+                    context = context,
+                    inputStream = stream,
+                    fileName = finalFileName,
+                    mimeType = mimeType,
+                    subPath = subPath,
+                    totalLength = contentLength,
+                    onProgress = onProgress
+                )
+            } else {
+                saveToDownloadsDirectory(
+                    inputStream = stream,
+                    fileName = finalFileName,
+                    subPath = subPath,
+                    totalLength = contentLength,
+                    onProgress = onProgress
+                )
+            }
+        }
+        true
+    } catch (error: Exception) {
+        Log.e("SaveError", "save live photo video failed: $url", error)
+        withContext(Dispatchers.Main.immediate) {
+            Toast.makeText(context, "保存失败: ${error.message}", Toast.LENGTH_SHORT).show()
+        }
+        false
+    } finally {
+        runCatching { cacheFile?.delete() }
+        runCatching { strippedFile?.delete() }
+    }
+}
+
+/** 下载 URL 到缓存文件，返回缓存文件或 null。 */
+private suspend fun downloadToCacheFile(
+    context: Context,
+    client: OkHttpClient,
+    url: String,
+    headers: Map<String, String>,
+    onProgress: suspend (Long, Long) -> Unit
+): File? {
+    val uniqueSuffix = url.hashCode().toString().replace("-", "")
+    val cacheFile = File(context.cacheDir, "live_photo_$uniqueSuffix.cache")
+    return try {
+        val requestBuilder = Request.Builder()
+            .url(url)
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        headers.forEach { (name, value) ->
+            if (name.isNotBlank() && value.isNotBlank()) {
+                requestBuilder.header(name, value)
+            }
+        }
+        val request = requestBuilder.build()
+
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException("download failed: ${response.code}")
+            }
+            val body = response.body ?: throw IOException("response body is empty")
+            val contentLength = body.contentLength()
+            if (contentLength > 0) {
+                onProgress(0L, contentLength)
+            }
+            cacheFile.outputStream().use { rawOutput ->
+                BufferedOutputStream(rawOutput, STREAM_BUFFER_SIZE).use { outputStream ->
+                    copyStreamWithProgress(body.byteStream(), outputStream, contentLength, onProgress)
+                }
+            }
+        }
+        cacheFile
+    } catch (error: Exception) {
+        Log.e("SaveError", "download to cache failed: $url", error)
+        runCatching { cacheFile.delete() }
+        null
+    }
+}
+
 /** 保存纯文本文件（歌词 .lrc/.txt 等）到 Downloads/dyparse/music。 */
 suspend fun saveTextFile(
     context: Context,
