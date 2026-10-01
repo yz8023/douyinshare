@@ -3,7 +3,7 @@ name: Release APK (self signed)
 on:
   push:
     tags:
-      - 'v4.14.5'
+      - 'v4.14.6'
   workflow_dispatch:
 
 permissions:
@@ -59,16 +59,35 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Run unit tests
+        id: unit_tests
+        continue-on-error: true
         shell: bash
         run: |
           set +e
           ./gradlew test --no-daemon --stacktrace 2>&1 | tee "$RUNNER_TEMP/unit-tests.log"
           code=${PIPESTATUS[0]}
+          echo "$code" > "$RUNNER_TEMP/unit-tests.exit"
           {
             echo '### Unit test output'
             tail -250 "$RUNNER_TEMP/unit-tests.log"
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$code"
+
+      - name: Upload test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-diagnostics
+          path: |
+            ${{ runner.temp }}/unit-tests.log
+            ${{ runner.temp }}/unit-tests.exit
+          if-no-files-found: warn
+
+      - name: Stop when unit tests fail
+        if: steps.unit_tests.outcome == 'failure'
+        run: |
+          echo 'Unit tests failed; see the unit-test-diagnostics artifact.'
+          exit 1
 
       - name: Assemble release APK
         run: ./gradlew assembleRelease --no-daemon --stacktrace
