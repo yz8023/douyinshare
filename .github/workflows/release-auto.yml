@@ -3,7 +3,7 @@ name: Release APK (self signed)
 on:
   push:
     tags:
-      - 'v4.14.6'
+      - 'v4.14.7'
   workflow_dispatch:
 
 permissions:
@@ -71,6 +71,9 @@ jobs:
             echo '### Unit test output'
             tail -250 "$RUNNER_TEMP/unit-tests.log"
           } >> "$GITHUB_STEP_SUMMARY"
+          grep -E '(^e: |error:|FAILURE|What went wrong|Execution failed)' "$RUNNER_TEMP/unit-tests.log" | tail -100 | while IFS= read -r line; do
+            echo "::error::$line"
+          done
           exit "$code"
 
       - name: Upload test diagnostics
