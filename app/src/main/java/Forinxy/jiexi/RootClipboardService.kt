@@ -14,6 +14,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -76,7 +77,7 @@ class RootClipboardService : Service() {
     }
 
     private suspend fun loop() {
-        while (isActive && running) {
+        while (currentCoroutineContext().isActive && running) {
             val text = RootAccess.readClipboard()
             if (!text.isNullOrBlank()) {
                 val hash = ClipboardShareContent.contentHash(text)

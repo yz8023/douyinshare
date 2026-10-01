@@ -1180,14 +1180,6 @@ fun ParserUI(
             }
         }
 
-        collectionMode?.let { mode ->
-            CollectionCaptureDialog(
-                mode = mode,
-                viewModel = parserViewModel,
-                onClose = { collectionMode = null }
-            )
-        }
-
         if (!isResumed) {
             Box(
                 modifier = Modifier
@@ -2196,6 +2188,14 @@ fun SettingsScreen(
                     }
                 )
             }
+        }
+
+        collectionMode?.let { mode ->
+            CollectionCaptureDialog(
+                mode = mode,
+                viewModel = parserViewModel,
+                onClose = { collectionMode = null }
+            )
         }
 
         if (!isResumed) {

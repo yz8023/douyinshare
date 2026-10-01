@@ -3,7 +3,7 @@ name: Release APK (self signed)
 on:
   push:
     tags:
-      - 'v4.14.7'
+      - 'v4.14.8'
   workflow_dispatch:
 
 permissions:
