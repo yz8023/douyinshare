@@ -146,9 +146,20 @@ private class AuthorCaptureBridge(
 }
 
 @Composable
-fun BatchParsePage(viewModel: ParserViewModel = viewModel()) {
+fun BatchParsePage(
+    viewModel: ParserViewModel = viewModel(),
+    initialInput: String? = null,
+    onInitialInputConsumed: () -> Unit = {}
+) {
     val context = LocalContext.current
     var input by rememberSaveable { mutableStateOf("") }
+
+    LaunchedEffect(initialInput) {
+        initialInput?.takeIf { it.isNotBlank() }?.let {
+            input = it
+            onInitialInputConsumed()
+        }
+    }
     var countInput by rememberSaveable { mutableStateOf("") }
     var positionInput by rememberSaveable { mutableStateOf("") }
     var captureRequest by remember { mutableStateOf<AuthorCaptureRequest?>(null) }
@@ -187,7 +198,15 @@ fun BatchParsePage(viewModel: ParserViewModel = viewModel()) {
                             IconButton(
                                 onClick = {
                                     clipboardManager.getText()?.let { clipText ->
-                                        input = clipText.text
+                                        val pasted = extractAuthorUrlFromShareText(clipText.text)
+                                        input = pasted
+                                        if (pasted.isNotBlank()) {
+                                            viewModel.parseAuthorBatch(
+                                                pasted,
+                                                countInput.trim(),
+                                                positionInput.trim()
+                                            )
+                                        }
                                     }
                                 },
                                 enabled = !isBusy
@@ -247,10 +266,14 @@ fun BatchParsePage(viewModel: ParserViewModel = viewModel()) {
                 }
                 MiuixPrimaryButton(
                     onClick = {
-                        if (shouldCaptureAuthorPageInWebView(input)) {
-                            captureRequest = AuthorCaptureRequest(input.trim(), countInput.trim(), positionInput.trim())
+                        // 抖音复制内容通常包含整段文案、括号和邮箱等附加文字。
+                        // 作者解析接口只应收到干净的主页/短链 URL，不能把整段文案原样送入解析器。
+                        val normalizedInput = extractAuthorUrlFromShareText(input)
+                        input = normalizedInput
+                        if (shouldCaptureAuthorPageInWebView(normalizedInput)) {
+                            captureRequest = AuthorCaptureRequest(normalizedInput, countInput.trim(), positionInput.trim())
                         } else {
-                            viewModel.parseAuthorBatch(input, countInput, positionInput)
+                            viewModel.parseAuthorBatch(normalizedInput, countInput, positionInput)
                         }
                     },
                     enabled = input.isNotBlank() && !isBusy
@@ -1433,6 +1456,11 @@ private data class ParsedAuthorPostBody(
 
 private fun shouldCaptureAuthorPageInWebView(input: String): Boolean {
     return false
+}
+
+private fun extractAuthorUrlFromShareText(input: String): String {
+    val url = extractFirstUrl(input) ?: input.trim()
+    return url.trimEnd('.', ',', '\uff0c', '\u3002', '!', '\uff01', '?', '\uff1f', ')', '\uff09', ']', '\u3011', '>', '\u300b', ';', '\uff1b')
 }
 
 private fun isAuthorPostApiUrl(url: String): Boolean {

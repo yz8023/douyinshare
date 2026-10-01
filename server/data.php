@@ -318,7 +318,13 @@ class DyParser {
     // 手动 cookie 覆盖预热同名键。没有 ttwid 时 detail API 会被风控拒绝（匿名数据/解析不全）。
     // 预热结果缓存 30 分钟，避免每次解析都请求 douyin.com 首页（加快单作品解析）。
     private function get_cookie_header($use_manual) {
-        $manual = ($use_manual && defined('DOUYIN_COOKIE') && DOUYIN_COOKIE !== '') ? DOUYIN_COOKIE : '';
+        // App 内登录 Cookie 通过受保护的请求头同步到用户自己的服务端。
+        // 仅在 cookie 模式使用，并由 API Token + HMAC 请求鉴权保护。
+        $clientCookie = ($use_manual && isset($_SERVER['HTTP_X_DOUYIN_COOKIE']))
+            ? trim($_SERVER['HTTP_X_DOUYIN_COOKIE']) : '';
+        $manual = $clientCookie !== ''
+            ? $clientCookie
+            : (($use_manual && defined('DOUYIN_COOKIE') && DOUYIN_COOKIE !== '') ? DOUYIN_COOKIE : '');
         // 预热拿 ttwid/msToken（缓存）
         $cacheFile = sys_get_temp_dir() . '/dyparse_ttwid_cache';
         $warm = [];
@@ -836,7 +842,10 @@ class DyParser {
     // 诊断：返回服务器版本/配置/参数解析状态（浏览器访问 data.php?diag=1）
     private function diag() {
         $warm = $this->try_warm();
-        $manual = (defined('DOUYIN_COOKIE') && DOUYIN_COOKIE !== '') ? DOUYIN_COOKIE : '';
+        $clientCookie = isset($_SERVER['HTTP_X_DOUYIN_COOKIE']) ? trim($_SERVER['HTTP_X_DOUYIN_COOKIE']) : '';
+        $manual = $clientCookie !== ''
+            ? $clientCookie
+            : ((defined('DOUYIN_COOKIE') && DOUYIN_COOKIE !== '') ? DOUYIN_COOKIE : '');
         $cookieHeader = $this->get_cookie_header(true);
         echo json_encode([
             'version' => 'dyparse-v9-cookie-fix',
@@ -848,7 +857,7 @@ class DyParser {
             'use_manual_when_mode_cookie' => (isset($_GET['mode']) && $_GET['mode'] === 'cookie') ? 'yes' : 'no',
             'douyin_cookie_defined' => defined('DOUYIN_COOKIE') ? 'yes' : 'no',
             'douyin_cookie_len' => strlen($manual),
-            'douyin_cookie_has_sessionid' => (strpos($manual, 'sessionid') !== false) ? 'yes' : 'no',
+            'douyin_cookie_has_sessionid' => preg_match('/(?:^|;\s*)(?:sessionid|sessionid_ss|sid_tt)=/i', $manual) ? 'yes' : 'no',
             'warm_ok' => ($warm !== '') ? 'yes' : 'no',
             'warm_cookie_preview' => substr($warm, 0, 60),
             'final_cookie_header_len' => strlen($cookieHeader),

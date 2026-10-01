@@ -1033,12 +1033,21 @@ private suspend fun performParse(input: String, useCookie: Boolean = false): Par
             normalized.matches(Regex(".*v\\.douyin\\.com/.*"))
     }
 
+    /** 从复制的分享文案中提取干净 URL，去掉 Markdown/中文标点尾巴。 */
+    private fun extractFirstUrl(text: String): String? {
+        val raw = Regex("https?://[^\\s\\u4e00-\\u9fa5<>\\\"']+")
+            .find(text)?.value ?: return null
+        return cleanUrl(raw)
+    }
+
+    private fun cleanUrl(raw: String): String =
+        raw.trim().trimEnd('.', ',', '，', '。', '！', '!', '？', '?', ')', '）', ']', '】', '>', '》', ';', '；')
+
     /** 同步检测：输入已含显式作者主页路径（/share/user/ /user/）时返回 (原文, 主页链接)，否则 null */
     private fun detectExplicitHomepageLink(input: String): Pair<String, String>? {
         val trimmed = input.trim()
         if (!trimmed.contains("douyin", ignoreCase = true)) return null
-        val url = Regex("https?://[^\\s\\u4e00-\\u9fa5]+").find(trimmed)?.value
-            ?: trimmed
+        val url = extractFirstUrl(trimmed) ?: trimmed
         if (
             url.contains("/share/user/", ignoreCase = true) ||
             url.contains("/user/", ignoreCase = true)
@@ -1051,9 +1060,9 @@ private suspend fun performParse(input: String, useCookie: Boolean = false): Par
     /** 后台检测：短链跟随重定向后若是作者主页，返回 (原文, 主页链接)，否则 null */
     private suspend fun detectHomepageViaRedirect(input: String): Pair<String, String>? = withContext(Dispatchers.IO) {
         val trimmed = input.trim()
-        val url = Regex("https?://[^\\s\\u4e00-\\u9fa5]+").find(trimmed)?.value
-            ?: if (trimmed.matches(Regex("https?://\\S+"))) trimmed else return@withContext null
-        if (!url.matches(Regex("https?://v\\.douyin\\.com/[\\w/=]+"))) {
+        val url = extractFirstUrl(trimmed)
+            ?: if (trimmed.matches(Regex("https?://\\S+"))) cleanUrl(trimmed) else return@withContext null
+        if (!url.matches(Regex("https?://v\\.douyin\\.com/[A-Za-z0-9_\\-=/]+(?:\\?[^\\s]*)?"))) {
             return@withContext null
         }
         val finalUrl = runCatching {
@@ -2201,7 +2210,9 @@ private suspend fun performParse(input: String, useCookie: Boolean = false): Par
         val tasks = mutableListOf<MediaSaveTask>()
 
         fun imageTaskFor(media: GalleryMedia, saveIndex: Int, totalImages: Int): MediaSaveTask? {
-            val imageUrl = media.imageUrl ?: return null
+            // 某些抖音分享页只返回实况视频地址，不返回静态图地址。
+            // 合成实况模式下用结果封面补齐静态图，避免最终只落盘一个视频。
+            val imageUrl = media.imageUrl ?: result.cover ?: return null
             return MediaSaveTask(
                 progressKey = "image_${result.videoId}_${media.index}_${result.parseTimestamp}",
                 fileName = buildImageFileName(baseName, saveIndex, totalImages),
@@ -2290,10 +2301,12 @@ private suspend fun performParse(input: String, useCookie: Boolean = false): Par
                     }
                 }
                 liveOnlyItems.forEachIndexed { saveIndex, media ->
+                    // 没有 image_url 的实况也要补一张封面，避免“合成实况”退化成仅视频。
+                    imageTaskFor(media, saveIndex, liveOnlyItems.size)?.let { tasks += it }
                     liveTaskFor(
                         media,
-                        buildLivePhotoFileName(baseName, saveIndex, liveOnlyItems.size),
-                        pairNaming = false
+                        buildImageFileName(baseName, saveIndex, liveOnlyItems.size),
+                        pairNaming = true
                     )?.let { tasks += it }
                 }
             }

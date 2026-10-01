@@ -73,6 +73,15 @@ object ServerApiClient {
                 .header("X-Token", cfg.token)
                 .header("X-Time", timeMs)
                 .header("X-Sign", sign)
+                .apply {
+                    // 用户在 App 内登录得到的 Cookie 只发送到用户明确配置的服务端，
+                    // 这样外部服务端无需手工复制 Cookie；服务端仍会优先使用 config.php。
+                    ServerConfigStore.context()?.let { appContext ->
+                        DouyinAuthStore.getCookie(appContext)
+                    }?.let { cookie ->
+                        header("X-Douyin-Cookie", cookie)
+                    }
+                }
                 .build()
 
             client.newCall(request).execute().use { response ->
@@ -237,14 +246,20 @@ object ServerApiClient {
     suspend fun testConnection(
         apiBase: String,
         token: String,
-        hmacKey: String
+        hmacKey: String,
+        douyinCookie: String? = null
     ): String = withContext(Dispatchers.IO) {
         val normalized = ServerConfigStore.normalizeUrl(apiBase)
             ?: return@withContext "❌ 地址格式不对：必须以 http:// 或 https:// 开头"
 
         val diagReport = try {
             val diagUrl = if (normalized.contains("?")) "$normalized&diag=1" else "$normalized?diag=1"
-            client.newCall(Request.Builder().url(diagUrl).get().build()).execute().use { resp ->
+            val diagRequest = Request.Builder().url(diagUrl).get().apply {
+                douyinCookie?.trim()?.takeIf { it.isNotBlank() }?.let {
+                    header("X-Douyin-Cookie", it)
+                }
+            }.build()
+            client.newCall(diagRequest).execute().use { resp ->
                 val body = resp.body?.string().orEmpty()
                 if (!resp.isSuccessful) {
                     return@withContext "❌ 连接失败：HTTP ${resp.code}\n请确认地址正确，且服务端已按 server/README.md 部署"
@@ -259,7 +274,10 @@ object ServerApiClient {
                 buildString {
                     append("✅ 服务端可达（").append(version).append("）")
                     append("\n抖音 Cookie：")
-                    append(if (hasCookie) "已配置" else "未配置（批量解析 / 原画质 / 最高画质会受限）")
+                    append(
+                        if (hasCookie) "已配置/已同步"
+                        else "未配置（批量解析 / 原画质 / 最高画质会受限）"
+                    )
                 }
             }
         } catch (e: Exception) {
