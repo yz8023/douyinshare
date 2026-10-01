@@ -3,7 +3,7 @@ name: Release APK (self signed)
 on:
   push:
     tags:
-      - 'v4.14.4'
+      - 'v4.14.5'
   workflow_dispatch:
 
 permissions:
@@ -59,7 +59,16 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Run unit tests
-        run: ./gradlew test --no-daemon --stacktrace
+        shell: bash
+        run: |
+          set +e
+          ./gradlew test --no-daemon --stacktrace 2>&1 | tee "$RUNNER_TEMP/unit-tests.log"
+          code=${PIPESTATUS[0]}
+          {
+            echo '### Unit test output'
+            tail -250 "$RUNNER_TEMP/unit-tests.log"
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$code"
 
       - name: Assemble release APK
         run: ./gradlew assembleRelease --no-daemon --stacktrace
