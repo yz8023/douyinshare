@@ -146,11 +146,28 @@ private class AuthorCaptureBridge(
 }
 
 @Composable
-fun BatchParsePage(viewModel: ParserViewModel = viewModel()) {
+fun BatchParsePage(
+    viewModel: ParserViewModel = viewModel(),
+    initialInput: String? = null,
+    onInitialInputConsumed: () -> Unit = {}
+) {
     val context = LocalContext.current
     var input by rememberSaveable { mutableStateOf("") }
+
     var countInput by rememberSaveable { mutableStateOf("") }
     var positionInput by rememberSaveable { mutableStateOf("") }
+
+    // 首页识别到作者主页后传入的内容也必须在批量页直接开始解析，不能只填入输入框等待用户再点一次。
+    LaunchedEffect(initialInput) {
+        initialInput?.takeIf { it.isNotBlank() }?.let {
+            val normalized = extractAuthorUrlFromShareText(it)
+            input = normalized.ifBlank { it }
+            onInitialInputConsumed()
+            if (input.isNotBlank()) {
+                viewModel.parseAuthorBatch(input, countInput.trim(), positionInput.trim())
+            }
+        }
+    }
     var captureRequest by remember { mutableStateOf<AuthorCaptureRequest?>(null) }
     val batchParseResult by viewModel.batchParseResult
     val saveState by viewModel.saveState
@@ -187,7 +204,15 @@ fun BatchParsePage(viewModel: ParserViewModel = viewModel()) {
                             IconButton(
                                 onClick = {
                                     clipboardManager.getText()?.let { clipText ->
-                                        input = clipText.text
+                                        val pasted = extractAuthorUrlFromShareText(clipText.text)
+                                        input = pasted
+                                        if (pasted.isNotBlank()) {
+                                            viewModel.parseAuthorBatch(
+                                                pasted,
+                                                countInput.trim(),
+                                                positionInput.trim()
+                                            )
+                                        }
                                     }
                                 },
                                 enabled = !isBusy
@@ -247,10 +272,14 @@ fun BatchParsePage(viewModel: ParserViewModel = viewModel()) {
                 }
                 MiuixPrimaryButton(
                     onClick = {
-                        if (shouldCaptureAuthorPageInWebView(input)) {
-                            captureRequest = AuthorCaptureRequest(input.trim(), countInput.trim(), positionInput.trim())
+                        // 抖音复制内容通常包含整段文案、括号和邮箱等附加文字。
+                        // 作者解析接口只应收到干净的主页/短链 URL，不能把整段文案原样送入解析器。
+                        val normalizedInput = extractAuthorUrlFromShareText(input)
+                        input = normalizedInput
+                        if (shouldCaptureAuthorPageInWebView(normalizedInput)) {
+                            captureRequest = AuthorCaptureRequest(normalizedInput, countInput.trim(), positionInput.trim())
                         } else {
-                            viewModel.parseAuthorBatch(input, countInput, positionInput)
+                            viewModel.parseAuthorBatch(normalizedInput, countInput, positionInput)
                         }
                     },
                     enabled = input.isNotBlank() && !isBusy
@@ -275,7 +304,7 @@ fun BatchParsePage(viewModel: ParserViewModel = viewModel()) {
                                 progressState = state
                             )
                         } else {
-                            BatchLoadingCard(state)
+                            BatchLoadingCard(state, onCancel = viewModel::cancelActiveParse)
                         }
                     }
 
@@ -759,7 +788,10 @@ private fun BatchHintCard() {
 }
 
 @Composable
-private fun BatchLoadingCard(state: BatchParseResult.Loading) {
+private fun BatchLoadingCard(
+    state: BatchParseResult.Loading,
+    onCancel: () -> Unit
+) {
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
@@ -784,6 +816,10 @@ private fun BatchLoadingCard(state: BatchParseResult.Loading) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedButton(onClick = onCancel) {
+                Text("取消解析")
+            }
         }
     }
 }
@@ -1433,6 +1469,11 @@ private data class ParsedAuthorPostBody(
 
 private fun shouldCaptureAuthorPageInWebView(input: String): Boolean {
     return false
+}
+
+private fun extractAuthorUrlFromShareText(input: String): String {
+    val url = extractFirstUrl(input) ?: input.trim()
+    return url.trimEnd('.', ',', '\uff0c', '\u3002', '!', '\uff01', '?', '\uff1f', ')', '\uff09', ']', '\u3011', '>', '\u300b', ';', '\uff1b')
 }
 
 private fun isAuthorPostApiUrl(url: String): Boolean {

@@ -72,6 +72,8 @@ import androidx.compose.material.icons.outlined.CleaningServices
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.ContentPaste
 import androidx.compose.material.icons.outlined.Feedback
+import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.HighQuality
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
@@ -327,6 +329,7 @@ fun MainScreen() {
     val mainPagerState = rememberMainPagerState(pagerState)
     // 剪贴板/历史页「跳回首页解析」请求：非空时首页填充该文本并自动解析
     var pendingHomeParse by remember { mutableStateOf<String?>(null) }
+    var pendingBatchParse by remember { mutableStateOf<String?>(null) }
     val currentPage = pagerState.currentPage
     val currentRoute = navigationItems[mainPagerState.selectedPage].route
     val surfaceColor = MaterialTheme.colorScheme.background
@@ -346,6 +349,9 @@ fun MainScreen() {
         // 若开启剪贴板监听且前台服务未运行，则启动它（前台应用启动 dataSync 类型服务是允许的）
         if (ClipboardMonitorPreferences.isEnabled(appContext) && !ClipboardMonitorService.running) {
             ClipboardMonitorService.start(appContext)
+        }
+        if (RootAccess.isEnabled(appContext) && !RootClipboardService.running) {
+            RootClipboardService.start(appContext)
         }
         // 悬浮球已开启且已授权时补启动（例如刚授权返回、或服务被杀后重建）
         if (FloatingWindowPreferences.isEnabled(appContext) &&
@@ -400,7 +406,11 @@ fun MainScreen() {
                         externalParseInput = pendingHomeParse,
                         onExternalParseConsumed = { pendingHomeParse = null }
                     )
-                    1 -> BatchParsePage(parserViewModel)
+                    1 -> BatchParsePage(
+                        viewModel = parserViewModel,
+                        initialInput = pendingBatchParse,
+                        onInitialInputConsumed = { pendingBatchParse = null }
+                    )
                     2 -> ClipboardRecordsPage(
                         parserViewModel = parserViewModel,
                         onOpenInHome = { record ->
@@ -409,7 +419,7 @@ fun MainScreen() {
                         }
                     )
                     3 -> ParseHistoryPage(parserViewModel)
-                    4 -> SettingsScreen(active = currentPage == 4)
+                    4 -> SettingsScreen(active = currentPage == 4, parserViewModel = parserViewModel)
                 }
             }
         }
@@ -558,44 +568,14 @@ fun MainScreen() {
             )
         }
 
-        // 首页粘贴了作者主页链接：引导跳转批量解析页
+        // 作者主页短链由首页识别后直接交给批量解析页，不再弹窗中转。
         val homepageLink = parserViewModel.homepageLinkDetected.value
-        if (homepageLink != null) {
-            MiuixAlertDialog(
-                onDismissRequest = { parserViewModel.clearHomepageLinkDetected() },
-                title = { Text("检测到作者主页链接") },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            "该链接是作者主页（非单个作品），可切换到「作者主页批量解析」页解析 TA 的全部作品。"
-                        )
-                        Text(
-                            homepageLink.second,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                },
-                confirmButton = {
-                    MiuixPrimaryButton(
-                        onClick = {
-                            parserViewModel.clearHomepageLinkDetected()
-                            mainPagerState.animateToPage(1)
-                        }
-                    ) {
-                        Text("去批量解析")
-                    }
-                },
-                dismissButton = {
-                    TextButton(
-                        onClick = { parserViewModel.clearHomepageLinkDetected() }
-                    ) {
-                        Text("取消")
-                    }
-                }
-            )
+        LaunchedEffect(homepageLink) {
+            homepageLink?.second?.let { url ->
+                pendingBatchParse = url
+                parserViewModel.clearHomepageLinkDetected()
+                mainPagerState.animateToPage(1)
+            }
         }
     }
 }
@@ -859,7 +839,13 @@ fun ParserUI(
                             modifier = Modifier.fillMaxWidth(),
                             contentAlignment = Alignment.Center
                         ) {
-                            CircularProgressIndicator()
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                CircularProgressIndicator()
+                                Spacer(modifier = Modifier.height(8.dp))
+                                OutlinedButton(onClick = viewModel::cancelActiveParse) {
+                                    Text("取消解析")
+                                }
+                            }
                         }
                     }
                 }
@@ -1314,7 +1300,10 @@ fun VideoPlayer(
 }
 
 @Composable
-fun SettingsScreen(active: Boolean = true) {
+fun SettingsScreen(
+    active: Boolean = true,
+    parserViewModel: ParserViewModel
+) {
     val context = LocalContext.current
     val appContext = remember(context) { context.applicationContext }
     val isResumed by rememberIsResumed()
@@ -1328,6 +1317,7 @@ fun SettingsScreen(active: Boolean = true) {
     var showSaveSizeLimitDialog by rememberSaveable { mutableStateOf(false) }
     var showServerConfigDialog by rememberSaveable { mutableStateOf(false) }
     var showDouyinLoginDialog by rememberSaveable { mutableStateOf(false) }
+    var collectionMode by rememberSaveable { mutableStateOf<CollectionMode?>(null) }
     var serverConfigSummary by rememberSaveable { mutableStateOf(describeServerConfig()) }
     var useInternalServer by rememberSaveable {
         mutableStateOf(ServerConfigStore.isUseInternalEnabled())
@@ -1359,6 +1349,9 @@ fun SettingsScreen(active: Boolean = true) {
     var accessibilityEnabled by rememberSaveable {
         mutableStateOf(isClipboardAccessibilityEnabled(appContext))
     }
+    var rootAvailable by rememberSaveable { mutableStateOf(false) }
+    var rootStatusText by rememberSaveable { mutableStateOf("检测中...") }
+    var rootClipboardEnabled by rememberSaveable { mutableStateOf(RootAccess.isEnabled(appContext)) }
     var floatingWindowEnabled by rememberSaveable {
         mutableStateOf(FloatingWindowPreferences.isEnabled(appContext))
     }
@@ -1395,6 +1388,9 @@ fun SettingsScreen(active: Boolean = true) {
     }
 
     LaunchedEffect(Unit, authRevision) {
+        val root = RootAccess.check()
+        rootAvailable = root.available
+        rootStatusText = root.detail
         cacheSize = getCacheSize(appContext)
         refreshVideoQualitySavePreferences()
         batchGridColumns = BatchDisplayPreferences.getBatchGridColumns(appContext)
@@ -1751,18 +1747,24 @@ fun SettingsScreen(active: Boolean = true) {
                 ) {
                     MiuixPrimaryButton(
                         onClick = {
+                            val cookieSynced = DouyinAuthStore.syncFromWebView(context)
                             ServerConfigStore.useInternal()
                             useInternalServer = true
                             serverConfigSummary = describeServerConfig()
                             showServerConfigDialog = false
-                            Toast.makeText(context, "已切换到内置服务器，安装即用", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(
+                                context,
+                                if (cookieSynced) "已切换到内置服务器，登录 Cookie 已同步" else "已切换到内置服务器，请先登录抖音",
+                                Toast.LENGTH_SHORT
+                            ).show()
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text("使用内置服务器（无需部署，推荐）")
                     }
                     Text(
-                        "也可填写自己部署的服务端信息，三个值必须与服务端 config.php 完全一致。" +
+                        "也可填写自己部署的服务端信息，接口地址、Token、HMAC 密钥必须与服务端 config.php 完全一致。" +
+                            "App 内登录的 Cookie 会在鉴权请求中安全同步到你填写的服务端；也可继续在 config.php 固定配置。" +
                             "保存外部服务器后自动关闭内置开关；想切回可点上方按钮或设置页开关。",
                         style = MaterialTheme.typography.bodySmall
                     )
@@ -1816,6 +1818,9 @@ fun SettingsScreen(active: Boolean = true) {
                             ).show()
                             return@MiuixPrimaryButton
                         }
+                        // 保存外部服务端时也从 WebView CookieJar 再同步一次，
+                        // 确保登录后无需手动复制 Cookie。
+                        DouyinAuthStore.syncFromWebView(context)
                         ServerConfigStore.save(
                             ServerConfigStore.Config(
                                 apiBase = apiBase,
@@ -1839,11 +1844,13 @@ fun SettingsScreen(active: Boolean = true) {
                             if (isTesting) return@MiuixOutlinedButton
                             isTesting = true
                             testResult = "测试中…"
+                            DouyinAuthStore.syncFromWebView(context)
                             scope.launch {
                                 testResult = ServerApiClient.testConnection(
                                     apiBase = apiBaseInput,
                                     token = tokenInput,
-                                    hmacKey = hmacInput
+                                    hmacKey = hmacInput,
+                                    douyinCookie = DouyinAuthStore.getCookie(context)
                                 )
                                 isTesting = false
                             }
@@ -1976,6 +1983,48 @@ fun SettingsScreen(active: Boolean = true) {
                         )
                         accessibilityEnabled = isClipboardAccessibilityEnabled(appContext)
                     }
+                )
+            }
+            item {
+                SettingsSwitchItem(
+                    icon = Icons.Outlined.ContentPaste,
+                    title = "Root 后台自动解析",
+                    subtitle = when {
+                        !rootAvailable -> "${rootStatusText}；不会读取 Cookie 或抖音私有数据"
+                        rootClipboardEnabled -> "Root 可用：仅监听剪贴板中的抖音分享内容"
+                        else -> "Root 可用：开启后可在应用退到后台时监听剪贴板"
+                    },
+                    checked = rootClipboardEnabled && rootAvailable,
+                    onCheckedChange = { checked ->
+                        if (!rootAvailable) {
+                            Toast.makeText(context, rootStatusText, Toast.LENGTH_SHORT).show()
+                        } else {
+                            rootClipboardEnabled = checked
+                            RootAccess.setEnabled(appContext, checked)
+                            if (checked) {
+                                requestNotificationPermissionIfNeeded(context)
+                                RootClipboardService.start(appContext)
+                            } else {
+                                RootClipboardService.stop(appContext)
+                            }
+                        }
+                    }
+                )
+            }
+            item {
+                SettingsItem(
+                    icon = Icons.Outlined.FavoriteBorder,
+                    title = "解析点赞作品",
+                    subtitle = "打开已登录的抖音点赞页，抓取当前已加载作品",
+                    onClick = { collectionMode = CollectionMode.LIKES }
+                )
+            }
+            item {
+                SettingsItem(
+                    icon = Icons.Outlined.BookmarkBorder,
+                    title = "解析收藏作品",
+                    subtitle = "打开已登录的抖音收藏页，抓取当前已加载作品",
+                    onClick = { collectionMode = CollectionMode.COLLECTION }
                 )
             }
             item {
@@ -2139,6 +2188,14 @@ fun SettingsScreen(active: Boolean = true) {
                     }
                 )
             }
+        }
+
+        collectionMode?.let { mode ->
+            CollectionCaptureDialog(
+                mode = mode,
+                viewModel = parserViewModel,
+                onClose = { collectionMode = null }
+            )
         }
 
         if (!isResumed) {

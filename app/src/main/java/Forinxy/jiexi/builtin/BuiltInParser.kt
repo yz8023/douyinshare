@@ -164,7 +164,11 @@ internal class BuiltInParser(context: Context) : PlatformParser {
         obj.addProperty("douyin_cookie_defined", Forinxy.jiexi.DouyinAuthStore.hasCookie(appContext))
         obj.addProperty(
             "douyin_cookie_has_sessionid",
-            if (cookieHeader.contains("sessionid", ignoreCase = true)) "yes" else "no"
+            if (Forinxy.jiexi.DouyinAuthStore.looksAuthenticated(cookieHeader)) "yes" else "no"
+        )
+        obj.addProperty(
+            "douyin_cookie_source",
+            if (Forinxy.jiexi.DouyinAuthStore.hasCookie(appContext)) "app-local" else "warm-anonymous"
         )
         return gson.toJson(obj)
     }

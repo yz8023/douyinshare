@@ -1,0 +1,121 @@
+name: Release APK (self signed)
+
+on:
+  push:
+    tags:
+      - 'v4.14.8'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  JAVA_VERSION: '21'
+  NDK_VERSION: '28.2.13676358'
+  CMAKE_VERSION: '3.22.1'
+
+jobs:
+  release:
+    name: Build and publish release APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+
+      - name: Install NDK and CMake
+        run: |
+          sdkmanager --install "ndk;${NDK_VERSION}" "cmake;${CMAKE_VERSION}"
+          echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Create temporary signing key
+        run: |
+          keytool -genkeypair -v \
+            -keystore "$RUNNER_TEMP/dyparse-release.jks" \
+            -storepass "arena-temporary-release" \
+            -keypass "arena-temporary-release" \
+            -alias dyparse \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=dyparse, OU=Release, O=dyparse, L=NA, ST=NA, C=US"
+          {
+            echo "RELEASE_STORE_FILE=$RUNNER_TEMP/dyparse-release.jks"
+            echo "RELEASE_STORE_PASSWORD=arena-temporary-release"
+            echo "RELEASE_KEY_ALIAS=dyparse"
+            echo "RELEASE_KEY_PASSWORD=arena-temporary-release"
+          } >> "$GITHUB_ENV"
+
+      - name: Run unit tests
+        id: unit_tests
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          ./gradlew test --no-daemon --stacktrace 2>&1 | tee "$RUNNER_TEMP/unit-tests.log"
+          code=${PIPESTATUS[0]}
+          echo "$code" > "$RUNNER_TEMP/unit-tests.exit"
+          {
+            echo '### Unit test output'
+            tail -250 "$RUNNER_TEMP/unit-tests.log"
+          } >> "$GITHUB_STEP_SUMMARY"
+          grep -E '(^e: |error:|FAILURE|What went wrong|Execution failed)' "$RUNNER_TEMP/unit-tests.log" | tail -100 | while IFS= read -r line; do
+            echo "::error::$line"
+          done
+          exit "$code"
+
+      - name: Upload test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-diagnostics
+          path: |
+            ${{ runner.temp }}/unit-tests.log
+            ${{ runner.temp }}/unit-tests.exit
+          if-no-files-found: warn
+
+      - name: Stop when unit tests fail
+        if: steps.unit_tests.outcome == 'failure'
+        run: |
+          echo 'Unit tests failed; see the unit-test-diagnostics artifact.'
+          exit 1
+
+      - name: Assemble release APK
+        run: ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Verify APK signature
+        run: |
+          APK=app/build/outputs/apk/release/app-release.apk
+          APKSIGNER=$(find "$ANDROID_SDK_ROOT/build-tools" -name apksigner -type f | sort | tail -1)
+          "$APKSIGNER" verify --print-certs "$APK"
+
+      - name: Create source archive
+        run: git archive --format=zip --prefix=douyinshare-${GITHUB_REF_NAME}/ -o douyinshare-${GITHUB_REF_NAME}-source.zip "${GITHUB_REF_NAME}"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          APK=app/build/outputs/apk/release/app-release.apk
+          SOURCE=douyinshare-${GITHUB_REF_NAME}-source.zip
+          if gh release view "${GITHUB_REF_NAME}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" "$APK" "$SOURCE" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" "$APK" "$SOURCE" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "${GITHUB_REF_NAME}" \
+              --notes "修复批量解析、取消任务、Root 后台剪贴板解析、收藏/点赞作品抓取及图集实况处理。APK 为 CI 临时签名 Release 包，仅供测试使用。" \
+              --verify-tag
+          fi

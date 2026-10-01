@@ -43,6 +43,11 @@
             android:foregroundServiceType="dataSync" />
 
         <service
+            android:name=".RootClipboardService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <service
             android:name=".FloatingBallService"
             android:exported="false"
             android:foregroundServiceType="specialUse">

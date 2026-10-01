@@ -2,6 +2,7 @@ package Forinxy.jiexi
 
 import com.google.gson.Gson
 import com.google.gson.JsonParser
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -91,9 +92,14 @@ object ServerAuthorClient {
             .header("X-Token", cfg.token)
             .header("X-Time", timeMs)
             .header("X-Sign", sign)
+            .apply {
+                ServerConfigStore.context()?.let { appContext ->
+                    DouyinAuthStore.getCookie(appContext)
+                }?.let { cookie -> header("X-Douyin-Cookie", cookie) }
+            }
             .build()
 
-        client.newCall(request).execute().use { response ->
+        client.awaitResponse(request).use { response ->
             val body = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
                 throw IOException("作者列表服务器错误 (${response.code})")
