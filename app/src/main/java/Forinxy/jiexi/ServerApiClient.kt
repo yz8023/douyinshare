@@ -5,6 +5,7 @@ import Forinxy.jiexi.data.LyricLine
 import Forinxy.jiexi.data.ParseResult
 import Forinxy.jiexi.data.VideoQualityOption
 import com.google.gson.Gson
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -84,7 +85,7 @@ object ServerApiClient {
                 }
                 .build()
 
-            client.newCall(request).execute().use { response ->
+            client.awaitResponse(request).use { response ->
                 val body = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
                     // 服务器返回错误：尝试解析 JSON 里的 error 字段
@@ -100,6 +101,9 @@ object ServerApiClient {
                 val result = parseServerResponse(body, input, batchId)
                 return@withContext result
             }
+        } catch (e: CancellationException) {
+            // 取消必须继续向上传播，否则界面点取消后会被伪装成一次失败并继续占用状态。
+            throw e
         } catch (e: Exception) {
             ParseResult.Error("解析失败(${e.javaClass.simpleName}: ${e.message})")
         }

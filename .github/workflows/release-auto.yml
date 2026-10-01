@@ -3,7 +3,7 @@ name: Release APK (self signed)
 on:
   push:
     tags:
-      - 'v4.14.3'
+      - 'v4.14.4'
   workflow_dispatch:
 
 permissions:
@@ -70,17 +70,21 @@ jobs:
           APKSIGNER=$(find "$ANDROID_SDK_ROOT/build-tools" -name apksigner -type f | sort | tail -1)
           "$APKSIGNER" verify --print-certs "$APK"
 
+      - name: Create source archive
+        run: git archive --format=zip --prefix=douyinshare-${GITHUB_REF_NAME}/ -o douyinshare-${GITHUB_REF_NAME}-source.zip "${GITHUB_REF_NAME}"
+
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           APK=app/build/outputs/apk/release/app-release.apk
+          SOURCE=douyinshare-${GITHUB_REF_NAME}-source.zip
           if gh release view "${GITHUB_REF_NAME}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "${GITHUB_REF_NAME}" "$APK" --repo "$GITHUB_REPOSITORY" --clobber
+            gh release upload "${GITHUB_REF_NAME}" "$APK" "$SOURCE" --repo "$GITHUB_REPOSITORY" --clobber
           else
-            gh release create "${GITHUB_REF_NAME}" "$APK" \
+            gh release create "${GITHUB_REF_NAME}" "$APK" "$SOURCE" \
               --repo "$GITHUB_REPOSITORY" \
               --title "${GITHUB_REF_NAME}" \
-              --notes "修复主页解析跳转与 Cookie 自动同步问题。此 APK 为 CI 临时签名 Release 包；后续版本如需覆盖安装，请继续使用同一签名密钥。仅供测试使用。" \
+              --notes "修复批量解析、取消任务、Root 后台剪贴板解析、收藏/点赞作品抓取及图集实况处理。APK 为 CI 临时签名 Release 包，仅供测试使用。" \
               --verify-tag
           fi

@@ -192,6 +192,21 @@ class ParserViewModel(application: Application) : AndroidViewModel(application) 
         _homepageLinkDetected.value = null
     }
 
+    /** 停止当前解析，避免失败请求把界面永久留在 Loading 状态。 */
+    fun cancelActiveParse() {
+        parseRequestToken++
+        batchParseRequestToken++
+        parseJob?.cancel()
+        batchParseJob?.cancel()
+        parseJob = null
+        batchParseJob = null
+        qualityResolveJob?.cancel()
+        qualityResolveJob = null
+        _parseResult.value = ParseResult.Idle
+        _multiLinkParseState.value = MultiLinkParseState.Idle
+        _batchParseResult.value = BatchParseResult.Idle
+    }
+
     /** 淇濆瓨鍓嶅ぇ灏忕‘璁わ紙UI 瑙傚療姝ょ姸鎬佸脊绐楋級 */
     private val _sizeConfirmRequest = mutableStateOf<SaveSizeConfirmRequest?>(null)
     val sizeConfirmRequest: State<SaveSizeConfirmRequest?> = _sizeConfirmRequest

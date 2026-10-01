@@ -154,14 +154,20 @@ fun BatchParsePage(
     val context = LocalContext.current
     var input by rememberSaveable { mutableStateOf("") }
 
-    LaunchedEffect(initialInput) {
-        initialInput?.takeIf { it.isNotBlank() }?.let {
-            input = it
-            onInitialInputConsumed()
-        }
-    }
     var countInput by rememberSaveable { mutableStateOf("") }
     var positionInput by rememberSaveable { mutableStateOf("") }
+
+    // 首页识别到作者主页后传入的内容也必须在批量页直接开始解析，不能只填入输入框等待用户再点一次。
+    LaunchedEffect(initialInput) {
+        initialInput?.takeIf { it.isNotBlank() }?.let {
+            val normalized = extractAuthorUrlFromShareText(it)
+            input = normalized.ifBlank { it }
+            onInitialInputConsumed()
+            if (input.isNotBlank()) {
+                viewModel.parseAuthorBatch(input, countInput.trim(), positionInput.trim())
+            }
+        }
+    }
     var captureRequest by remember { mutableStateOf<AuthorCaptureRequest?>(null) }
     val batchParseResult by viewModel.batchParseResult
     val saveState by viewModel.saveState
@@ -298,7 +304,7 @@ fun BatchParsePage(
                                 progressState = state
                             )
                         } else {
-                            BatchLoadingCard(state)
+                            BatchLoadingCard(state, onCancel = viewModel::cancelActiveParse)
                         }
                     }
 
@@ -782,7 +788,10 @@ private fun BatchHintCard() {
 }
 
 @Composable
-private fun BatchLoadingCard(state: BatchParseResult.Loading) {
+private fun BatchLoadingCard(
+    state: BatchParseResult.Loading,
+    onCancel: () -> Unit
+) {
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
@@ -807,6 +816,10 @@ private fun BatchLoadingCard(state: BatchParseResult.Loading) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedButton(onClick = onCancel) {
+                Text("取消解析")
+            }
         }
     }
 }

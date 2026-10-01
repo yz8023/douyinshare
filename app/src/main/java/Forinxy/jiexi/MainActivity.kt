@@ -72,6 +72,8 @@ import androidx.compose.material.icons.outlined.CleaningServices
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.ContentPaste
 import androidx.compose.material.icons.outlined.Feedback
+import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.HighQuality
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
@@ -348,6 +350,9 @@ fun MainScreen() {
         if (ClipboardMonitorPreferences.isEnabled(appContext) && !ClipboardMonitorService.running) {
             ClipboardMonitorService.start(appContext)
         }
+        if (RootAccess.isEnabled(appContext) && !RootClipboardService.running) {
+            RootClipboardService.start(appContext)
+        }
         // 悬浮球已开启且已授权时补启动（例如刚授权返回、或服务被杀后重建）
         if (FloatingWindowPreferences.isEnabled(appContext) &&
             FloatingWindowPreferences.canDrawOverlays(appContext) &&
@@ -414,7 +419,7 @@ fun MainScreen() {
                         }
                     )
                     3 -> ParseHistoryPage(parserViewModel)
-                    4 -> SettingsScreen(active = currentPage == 4)
+                    4 -> SettingsScreen(active = currentPage == 4, parserViewModel = parserViewModel)
                 }
             }
         }
@@ -834,7 +839,13 @@ fun ParserUI(
                             modifier = Modifier.fillMaxWidth(),
                             contentAlignment = Alignment.Center
                         ) {
-                            CircularProgressIndicator()
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                CircularProgressIndicator()
+                                Spacer(modifier = Modifier.height(8.dp))
+                                OutlinedButton(onClick = viewModel::cancelActiveParse) {
+                                    Text("取消解析")
+                                }
+                            }
                         }
                     }
                 }
@@ -1169,6 +1180,14 @@ fun ParserUI(
             }
         }
 
+        collectionMode?.let { mode ->
+            CollectionCaptureDialog(
+                mode = mode,
+                viewModel = parserViewModel,
+                onClose = { collectionMode = null }
+            )
+        }
+
         if (!isResumed) {
             Box(
                 modifier = Modifier
@@ -1289,7 +1308,10 @@ fun VideoPlayer(
 }
 
 @Composable
-fun SettingsScreen(active: Boolean = true) {
+fun SettingsScreen(
+    active: Boolean = true,
+    parserViewModel: ParserViewModel
+) {
     val context = LocalContext.current
     val appContext = remember(context) { context.applicationContext }
     val isResumed by rememberIsResumed()
@@ -1303,6 +1325,7 @@ fun SettingsScreen(active: Boolean = true) {
     var showSaveSizeLimitDialog by rememberSaveable { mutableStateOf(false) }
     var showServerConfigDialog by rememberSaveable { mutableStateOf(false) }
     var showDouyinLoginDialog by rememberSaveable { mutableStateOf(false) }
+    var collectionMode by rememberSaveable { mutableStateOf<CollectionMode?>(null) }
     var serverConfigSummary by rememberSaveable { mutableStateOf(describeServerConfig()) }
     var useInternalServer by rememberSaveable {
         mutableStateOf(ServerConfigStore.isUseInternalEnabled())
@@ -1334,6 +1357,9 @@ fun SettingsScreen(active: Boolean = true) {
     var accessibilityEnabled by rememberSaveable {
         mutableStateOf(isClipboardAccessibilityEnabled(appContext))
     }
+    var rootAvailable by rememberSaveable { mutableStateOf(false) }
+    var rootStatusText by rememberSaveable { mutableStateOf("检测中...") }
+    var rootClipboardEnabled by rememberSaveable { mutableStateOf(RootAccess.isEnabled(appContext)) }
     var floatingWindowEnabled by rememberSaveable {
         mutableStateOf(FloatingWindowPreferences.isEnabled(appContext))
     }
@@ -1370,6 +1396,9 @@ fun SettingsScreen(active: Boolean = true) {
     }
 
     LaunchedEffect(Unit, authRevision) {
+        val root = RootAccess.check()
+        rootAvailable = root.available
+        rootStatusText = root.detail
         cacheSize = getCacheSize(appContext)
         refreshVideoQualitySavePreferences()
         batchGridColumns = BatchDisplayPreferences.getBatchGridColumns(appContext)
@@ -1962,6 +1991,48 @@ fun SettingsScreen(active: Boolean = true) {
                         )
                         accessibilityEnabled = isClipboardAccessibilityEnabled(appContext)
                     }
+                )
+            }
+            item {
+                SettingsSwitchItem(
+                    icon = Icons.Outlined.ContentPaste,
+                    title = "Root 后台自动解析",
+                    subtitle = when {
+                        !rootAvailable -> "${rootStatusText}；不会读取 Cookie 或抖音私有数据"
+                        rootClipboardEnabled -> "Root 可用：仅监听剪贴板中的抖音分享内容"
+                        else -> "Root 可用：开启后可在应用退到后台时监听剪贴板"
+                    },
+                    checked = rootClipboardEnabled && rootAvailable,
+                    onCheckedChange = { checked ->
+                        if (!rootAvailable) {
+                            Toast.makeText(context, rootStatusText, Toast.LENGTH_SHORT).show()
+                        } else {
+                            rootClipboardEnabled = checked
+                            RootAccess.setEnabled(appContext, checked)
+                            if (checked) {
+                                requestNotificationPermissionIfNeeded(context)
+                                RootClipboardService.start(appContext)
+                            } else {
+                                RootClipboardService.stop(appContext)
+                            }
+                        }
+                    }
+                )
+            }
+            item {
+                SettingsItem(
+                    icon = Icons.Outlined.FavoriteBorder,
+                    title = "解析点赞作品",
+                    subtitle = "打开已登录的抖音点赞页，抓取当前已加载作品",
+                    onClick = { collectionMode = CollectionMode.LIKES }
+                )
+            }
+            item {
+                SettingsItem(
+                    icon = Icons.Outlined.BookmarkBorder,
+                    title = "解析收藏作品",
+                    subtitle = "打开已登录的抖音收藏页，抓取当前已加载作品",
+                    onClick = { collectionMode = CollectionMode.COLLECTION }
                 )
             }
             item {
