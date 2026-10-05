@@ -40,6 +40,7 @@ import okhttp3.Dispatcher
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
+import okhttp3.Protocol
 import okhttp3.Request
 import java.io.File
 import java.io.IOException
@@ -239,13 +240,15 @@ class ParserViewModel(application: Application) : AndroidViewModel(application) 
     private val downloadClient = client.newBuilder()
         .dispatcher(Dispatcher().apply {
             maxRequests = 64
-            maxRequestsPerHost = 24
+            maxRequestsPerHost = 32
         })
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
-        // 鍘绘帀 HTTP_1.1 闄愬埗锛氳 OkHttp 鍗忓晢 HTTP/2锛堟姈闊?CDN 鏀寔锛夛紝澶氳矾澶嶇敤鎻愬崌鍚炲悙
+        // 下载强制 HTTP/1.1：每个并发 Range 分段独占一条 TCP 连接，
+        // 绕开 CDN 的单连接限速（HTTP/2 多路复用会把全部分段压进同一条连接，总吞吐被单连接限速卡死）
+        .protocols(listOf(Protocol.HTTP_1_1))
         .build()
 
     private val gson = Gson()

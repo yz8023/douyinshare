@@ -58,8 +58,8 @@ android {
         applicationId = "Forinxy.jiexi"
         minSdk = 24
         targetSdk = 34
-        versionCode = 73
-        versionName = "4.14.8"
+        versionCode = 74
+        versionName = "4.14.9"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

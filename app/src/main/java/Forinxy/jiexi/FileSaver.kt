@@ -35,9 +35,9 @@ private const val MAX_SAVE_ATTEMPTS = 3
 private const val SAVE_RETRY_DELAY_MS = 450L
 private const val MAX_MEDIASTORE_NAME_ATTEMPTS = 50
 private const val STREAM_BUFFER_SIZE = 256 * 1024
-private const val MIN_PARALLEL_VIDEO_BYTES = 24L * 1024L * 1024L
-private const val RANGE_SEGMENT_TARGET_BYTES = 16L * 1024L * 1024L
-private const val MAX_PARALLEL_VIDEO_RANGES = 24
+private const val MIN_PARALLEL_VIDEO_BYTES = 16L * 1024L * 1024L
+private const val RANGE_SEGMENT_TARGET_BYTES = 8L * 1024L * 1024L
+private const val MAX_PARALLEL_VIDEO_RANGES = 32
 private const val MAX_RANGE_SEGMENT_ATTEMPTS = 3
 
 private data class RangeProbe(
