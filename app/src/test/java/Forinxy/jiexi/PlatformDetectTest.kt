@@ -176,8 +176,40 @@ class PlatformDetectTest {
     }
 
     @Test
-    fun unknown_tiktok_url_returns_null() {
-        assertNull(Platform.detect("https://www.tiktok.com/@user/video/12345"))
+    fun tiktok_full_video_url() {
+        assertEquals(
+            Platform.TIKTOK,
+            Platform.detect("https://www.tiktok.com/@user/video/12345")
+        )
+    }
+
+    @Test
+    fun tiktok_short_vt_link() {
+        assertEquals(
+            Platform.TIKTOK,
+            Platform.detect("https://vt.tiktok.com/ZSbCqqPCq/")
+        )
+    }
+
+    @Test
+    fun tiktok_photo_url() {
+        assertEquals(
+            Platform.TIKTOK,
+            Platform.detect("https://www.tiktok.com/@user/photo/7683526590705290516")
+        )
+    }
+
+    @Test
+    fun tiktok_share_text() {
+        assertEquals(
+            Platform.TIKTOK,
+            Platform.detect("Check this out https://vt.tiktok.com/ZSbCqqPCq/ enjoy")
+        )
+    }
+
+    @Test
+    fun unknown_instagram_url_returns_null() {
+        assertNull(Platform.detect("https://www.instagram.com/reel/abc123"))
     }
 
     @Test

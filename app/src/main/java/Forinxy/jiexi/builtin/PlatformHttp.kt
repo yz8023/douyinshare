@@ -11,8 +11,14 @@ import java.util.concurrent.TimeUnit
 data class HttpResult(
     val body: String,
     val finalUrl: String,
-    val statusCode: Int
-)
+    val statusCode: Int,
+    /** 响应头（键已小写化；同键多值合并，供 Set-Cookie 等场景读取） */
+    val headers: Map<String, List<String>> = emptyMap()
+) {
+    /** 取首个同名头值（不区分大小写），无则返回 null */
+    fun header(name: String): String? =
+        headers[name.lowercase()]?.firstOrNull()
+}
 
 /**
  * 平台解析器共用的 HTTP 通道。统一超时/重定向策略；各平台通过 headers
@@ -50,7 +56,13 @@ internal class PlatformHttp(private val client: OkHttpClient) {
             }
             client.newCall(request).execute().use { response ->
                 val respBody = response.body?.string().orEmpty()
-                HttpResult(respBody, response.request.url.toString(), response.code)
+                val headerMap = LinkedHashMap<String, List<String>>()
+                for ((name, values) in response.headers) {
+                    if (name.isBlank()) continue
+                    val key = name.lowercase()
+                    headerMap[key] = (headerMap[key] ?: emptyList()) + values
+                }
+                HttpResult(respBody, response.request.url.toString(), response.code, headerMap)
             }
         } catch (e: IOException) {
             Log.w(TAG, "$method $url failed", e)

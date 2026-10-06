@@ -3,11 +3,14 @@ package Forinxy.jiexi
 import android.content.Context
 import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import Forinxy.jiexi.builtin.TikTokSessionStore
 import java.io.File
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
@@ -23,9 +26,20 @@ object PreviewPlaybackCache {
 
     fun createPlayer(context: Context): ExoPlayer {
         val appContext = context.applicationContext
+        // TikTok CDN 校验 tt_chain_token Cookie：预览请求按 URL 域名注入解析会话头
+        val httpFactory = DefaultHttpDataSource.Factory()
+            .setAllowCrossProtocolRedirects(true)
+        val resolvingFactory = ResolvingDataSource.Factory(httpFactory) { dataSpec ->
+            val extra = TikTokSessionStore.headersFor(dataSpec.uri.toString())
+            if (extra.isEmpty()) {
+                dataSpec
+            } else {
+                dataSpec.buildUpon().setHttpRequestHeaders(extra).build()
+            }
+        }
         val dataSourceFactory = CacheDataSource.Factory()
             .setCache(getMediaCache(appContext))
-            .setUpstreamDataSourceFactory(DefaultDataSource.Factory(appContext))
+            .setUpstreamDataSourceFactory(DefaultDataSource.Factory(appContext, resolvingFactory))
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
         val mediaSourceFactory = DefaultMediaSourceFactory(appContext)
             .setDataSourceFactory(dataSourceFactory)

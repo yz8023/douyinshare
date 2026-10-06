@@ -58,7 +58,8 @@ internal class MultiPlatformParser(context: Context) : MediaParser {
         YuanbaoParser(http),
         JimengParser(http),
         PinduoduoParser(http),
-        DoubaoParser(http)
+        DoubaoParser(http),
+        TikTokParser(http)
     )
 
     private val byPlatform: Map<Platform, PlatformParser> = indexByPlatform(parsers)
@@ -83,7 +84,7 @@ internal class MultiPlatformParser(context: Context) : MediaParser {
 
     override fun diag(): String {
         val obj = com.google.gson.JsonObject()
-        obj.addProperty("version", "dyparse-builtin-4.9")
+        obj.addProperty("version", "dyparse-builtin-4.10")
         obj.addProperty("platform", "android-inner")
         obj.addProperty("success", true)
         val supported = com.google.gson.JsonArray()

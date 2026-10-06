@@ -19,6 +19,7 @@ import Forinxy.jiexi.data.ParseResult
 import Forinxy.jiexi.data.VideoQualityOption
 import Forinxy.jiexi.data.galleryItems
 import Forinxy.jiexi.data.totalMediaAssetCount
+import Forinxy.jiexi.builtin.TikTokSessionStore
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -1010,6 +1011,9 @@ private suspend fun performParse(input: String, useCookie: Boolean = false): Par
     /**
      * 解析通道选择：已配置服务器 → 走服务器（原逻辑，支持 quality_list/原画质/批量 cookie）；
      * 未配置服务器（占位地址）→ 走 App 内置抖音登录会话本地解析（无需自建服务器）。
+     *
+     * TikTok 仅在 App 内置通道实现：用户配置了外部服务器时，TikTok 输入仍强制
+     * 指回内置解析服务器（内置未启动则原样走外部，由外部服务端自行处理）。
      */
     private suspend fun serverOrLocalParse(
         input: String,
@@ -1022,18 +1026,27 @@ private suspend fun performParse(input: String, useCookie: Boolean = false): Par
         if (ServerConfigStore.isPlaceholder(cfg.apiBase)) {
             localParseEngine.parse(input)
         } else {
+            // TikTok 等仅内置通道支持的平台：配置外部服务器时也回内置
+            val forceInternalBase = looksLikeTiktokInput(input) &&
+                !ServerConfigStore.isInternal(cfg.apiBase)
+            val baseOverride = if (forceInternalBase) {
+                ServerConfigStore.internalBaseUrl() ?: cfg.apiBase
+            } else {
+                null
+            }
             val serverResult = ServerApiClient.parse(
                 input = input,
                 useCookie = useCookie,
                 original = original,
                 highest = highest,
-                batchId = batchId
+                batchId = batchId,
+                baseUrlOverride = baseOverride
             )
             // 内置服务器分享页通道对图集（/note/）无数据，失败时回退本地 detail API
             if (
                 serverResult is ParseResult.Error &&
                 batchId == null &&
-                ServerConfigStore.isInternal(cfg.apiBase) &&
+                ServerConfigStore.isInternal(baseOverride ?: cfg.apiBase) &&
                 looksLikeGalleryInput(input)
             ) {
                 localParseEngine.parse(input)
@@ -1041,6 +1054,17 @@ private suspend fun performParse(input: String, useCookie: Boolean = false): Par
                 serverResult
             }
         }
+    }
+
+    /** 输入是否为 TikTok 链接（分享文案中的链接也算） */
+    private fun looksLikeTiktokInput(input: String): Boolean {
+        val host = runCatching { java.net.URI(input.trim()).host }.getOrNull()
+        if (host != null) {
+            return host.lowercase() == "tiktok.com" || host.lowercase().endsWith(".tiktok.com")
+        }
+        val link = Regex("https?://[^\\s\\u4e00-\\u9fa5'\"]+").find(input)?.value ?: return false
+        val linkHost = runCatching { java.net.URI(link).host }.getOrNull() ?: return false
+        return linkHost.lowercase() == "tiktok.com" || linkHost.lowercase().endsWith(".tiktok.com")
     }
 
     /** 判断输入是否可能为图集图文（/note/ 路径或短链），用于内置服务器失败时的本地回退 */
@@ -1208,6 +1232,8 @@ private suspend fun performParse(input: String, useCookie: Boolean = false): Par
 
     /** 保存/下载请求头：UA + Referer + 本地 cookie（抖音 CDN 校验，缺 Referer/Cookie 会 403） */
     private fun buildSaveHeaders(url: String): Map<String, String> {
+        // TikTok CDN 校验需与解析时同源的 UA + tt_chain_token Cookie
+        TikTokSessionStore.headersFor(url).takeIf { it.isNotEmpty() }?.let { return it }
         val cookie = DouyinAuthStore.getCookie(getApplication<Application>().applicationContext)
         return DouyinVideoDownloadResolver.buildDownloadHeaders(url, cookie)
     }
@@ -1615,6 +1641,11 @@ private suspend fun performParse(input: String, useCookie: Boolean = false): Par
 
         var refreshSucceeded = false
         val rawUrl = item.rawPlayUrl ?: return@withContext VideoUrlResolution(item.playUrl)
+        // TikTok 直链没有抖音 aweme/v1/play 的 302 刷新语义：刷新请求只会空耗并可能
+        // 因 Cookie 校验 403 污染限流状态，过期后直接用缓存地址（失效则重新解析）
+        if (TikTokSessionStore.isTikTokUrl(rawUrl)) {
+            return@withContext VideoUrlResolution(item.playUrl)
+        }
         val newUrl = try {
             DouyinRequestLimiter.acquire(singleParseIntervalMs())
             // 鍒锋柊鎾斁鐩撮摼锛氬鐢ㄤ笅杞借姹傚ご锛圲A/Referer/Cookie锛夛紝
@@ -1682,6 +1713,10 @@ private suspend fun performParse(input: String, useCookie: Boolean = false): Par
     }
 
     private fun buildDirectMediaDownloadRequest(url: String): DouyinDownloadRequest {
+        val tiktokHeaders = TikTokSessionStore.headersFor(url)
+        if (tiktokHeaders.isNotEmpty()) {
+            return DouyinDownloadRequest(url = url, headers = tiktokHeaders)
+        }
         val cookieHeader = DouyinAuthStore.getCookie(getApplication<Application>().applicationContext)
         return DouyinDownloadRequest(
             url = url,

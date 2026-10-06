@@ -64,7 +64,9 @@ enum class Platform(val label: String) {
     PINDUODUO("拼多多"),
     BUTTERFLYAI("星绘AI"),
     CCTV("央视"),
-    YANG_SHIPIN("央视频");
+    YANG_SHIPIN("央视频"),
+    // ---- 国际平台 ----
+    TIKTOK("TikTok");
 
     val isMusic: Boolean
         get() = this == NETEASE_MUSIC || this == QISHUI_MUSIC ||
@@ -187,6 +189,9 @@ enum class Platform(val label: String) {
                 hostsMatch(h, "butterflyai.cn") -> BUTTERFLYAI
                 hostsMatch(h, "cctv.com", "cctv.cn", "cctvnews.cctv.com", "content-static.cctvnews.cctv.com") -> CCTV
                 hostsMatch(h, "yspapp.cn", "yangshipin.cn") -> YANG_SHIPIN
+
+                // ---- 国际平台 ----
+                hostsMatch(h, "tiktok.com") -> TIKTOK
 
                 // ---- 音乐/音频平台 ----
                 hostsMatch(h, "y.qq.com") -> QQ_MUSIC

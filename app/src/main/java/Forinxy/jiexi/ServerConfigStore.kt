@@ -66,6 +66,9 @@ object ServerConfigStore {
         internalAuthorBase = authorApiBase
     }
 
+    /** 内置解析服务器地址（未启动内置服务器时为 null），供 TikTok 等仅内置平台强制走内置通道 */
+    fun internalBaseUrl(): String? = internalBase
+
     fun clearInternalBase() {
         internalBase = null
         internalAuthorBase = null

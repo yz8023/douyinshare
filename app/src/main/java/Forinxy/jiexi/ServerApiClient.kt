@@ -44,16 +44,20 @@ object ServerApiClient {
      * @param original 是否请求原画质地址（保存时用，配合 useCookie=true，ratio=default）
      * @param highest 是否请求最高画质（保存时用，优先级高于 original，服务器自动判断）
      * @param batchId 批量解析时传入 batchId（供结果标记）
+     * @param baseUrlOverride 覆盖配置的服务器地址（TikTok 等仅内置通道支持的平台，
+     *   配置了外部服务器时也强制指回 App 内置解析服务器）
      */
     suspend fun parse(
         input: String,
         useCookie: Boolean = false,
         original: Boolean = false,
         highest: Boolean = false,
-        batchId: String? = null
+        batchId: String? = null,
+        baseUrlOverride: String? = null
     ): ParseResult = withContext(Dispatchers.IO) {
         val cfg = config()
-        if (ServerConfigStore.isPlaceholder(cfg.apiBase)) {
+        val apiBase = baseUrlOverride ?: cfg.apiBase
+        if (ServerConfigStore.isPlaceholder(apiBase)) {
             return@withContext ParseResult.Error(NOT_CONFIGURED_HINT)
         }
         try {
@@ -62,7 +66,7 @@ object ServerApiClient {
             val modeParam = if (useCookie) "&mode=cookie" else ""
             val originalParam = if (original) "&original=1" else ""
             val highestParam = if (highest) "&highest=1" else ""
-            val fullUrl = cfg.apiBase + "?url=" + encodedInput + modeParam + originalParam + highestParam
+            val fullUrl = apiBase + "?url=" + encodedInput + modeParam + originalParam + highestParam
 
             val timeMs = System.currentTimeMillis().toString()
             // 签名串 = token + time + 原始编码url + mode + original + highest后缀（与服务器一致）
