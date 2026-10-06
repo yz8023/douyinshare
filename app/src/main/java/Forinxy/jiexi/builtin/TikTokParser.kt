@@ -59,12 +59,21 @@ internal class TikTokParser(private val http: PlatformHttp) : PlatformParser {
             ?: return failResponse("视频不存在或已删除")
 
         val root = TikTokPageData.extractUniversalData(page.html)
-            ?: return failResponse("无法获取视频数据（页面被风控或结构变化）")
-        val item = TikTokPageData.extractItemStruct(root)
-            ?: return failResponse("视频不存在或已删除")
+        val item = root?.let { TikTokPageData.extractItemStruct(it) }
+            ?: TikTokPageData.extractItemStructFromSigi(page.html)
+            ?: return failResponse(
+                if (TikTokPageData.isWafChallengePage(page.html)) {
+                    // WAF JS 挑战壳页：OkHttp 过不去，需要 WebView 预热会话后重试
+                    "TikTok 风控拦截，请稍后重试"
+                } else {
+                    "视频不存在或已删除"
+                }
+            )
 
-        // 解析成功即登记会话：下载/预览 CDN 需要同源 UA+Cookie（tt_chain_token 校验）
-        TikTokSessionStore.register(PlatformHttp.PC_UA, page.cookieHeader)
+        // 页面请求种下了新 Cookie 则刷新会话；否则保留已有（WebView 预热）会话
+        if (page.cookieHeader.isNotBlank()) {
+            TikTokSessionStore.register(PlatformHttp.PC_UA, page.cookieHeader)
+        }
 
         val md = MediaData()
         md.inputUrl = input
@@ -173,6 +182,12 @@ internal class TikTokParser(private val http: PlatformHttp) : PlatformParser {
     private fun fetchPage(startUrl: String): PageData? {
         var current = startUrl
         val jar = LinkedHashMap<String, String>()
+        // 预热会话（WebView 收割的 WAF 放行 Cookie）作为初始 Cookie
+        TikTokSessionStore.currentCookieHeader().takeIf { it.isNotBlank() }?.let { stored ->
+            for (pair in stored.split(";")) {
+                TikTokPageData.parseSetCookie(pair)?.let { (name, value) -> jar[name] = value }
+            }
+        }
         var hops = 0
         while (hops < MAX_REDIRECT_HOPS) {
             hops++

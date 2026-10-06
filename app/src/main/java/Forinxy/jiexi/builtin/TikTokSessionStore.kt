@@ -14,19 +14,33 @@ object TikTokSessionStore {
 
     private data class Session(
         val userAgent: String,
-        val cookieHeader: String
+        val cookieHeader: String,
+        val updatedAtMs: Long
     )
+
+    /** WebView 预热会话的复用有效期：12 小时，过期后重新预热 */
+    const val MAX_SESSION_AGE_MS: Long = 12L * 60L * 60L * 1000L
 
     @Volatile
     private var session: Session? = null
 
     /** 解析成功后登记会话（与最后一次解析同源的 UA/Cookie） */
     fun register(userAgent: String, cookieHeader: String) {
-        session = Session(userAgent, cookieHeader)
+        session = Session(userAgent, cookieHeader, System.currentTimeMillis())
     }
 
     /** 当前是否登记过会话 */
     fun hasSession(): Boolean = session != null
+
+    /** 是否存在未过期的会话 Cookie（用于决定是否需要 WebView 预热） */
+    fun hasFreshCookie(maxAgeMs: Long = MAX_SESSION_AGE_MS): Boolean {
+        val s = session ?: return false
+        return s.cookieHeader.isNotBlank() &&
+            System.currentTimeMillis() - s.updatedAtMs <= maxAgeMs
+    }
+
+    /** 取当前会话 Cookie（下载/页面请求附加用），无则空串 */
+    fun currentCookieHeader(): String = session?.cookieHeader.orEmpty()
 
     /** 解除登记（登出/清理场景） */
     fun clear() {

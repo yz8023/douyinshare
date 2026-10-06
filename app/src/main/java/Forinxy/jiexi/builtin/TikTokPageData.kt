@@ -45,13 +45,34 @@ internal object TikTokPageData {
         return parseJsonObj(raw)
     }
 
-    /** 从 UNIVERSAL 根对象定位 itemStruct */
+    /** 从 UNIVERSAL 根对象定位 itemStruct（兼容桌面版与移动端 reflow 两种 scope 键） */
     fun extractItemStruct(root: JsonObject): JsonObject? {
-        return root.jObj("__DEFAULT_SCOPE__")
-            ?.jObj("webapp.video-detail")
-            ?.jObj("itemInfo")
-            ?.jObj("itemStruct")
+        val scope = root.jObj("__DEFAULT_SCOPE__") ?: return null
+        for (key in ITEM_SCOPE_KEYS) {
+            val item = scope.jObj(key)?.jObj("itemInfo")?.jObj("itemStruct")
+            if (item != null) return item
+        }
+        return null
     }
+
+    /** SIGI_STATE 兜底：旧版页面结构，ItemModule 按作品 ID 索引 */
+    fun extractItemStructFromSigi(html: String): JsonObject? {
+        val matcher = Pattern.compile(
+            "<script\\s+id=\"SIGI_STATE\"[^>]*>([\\s\\S]*?)</script>"
+        ).matcher(html)
+        if (!matcher.find()) return null
+        val raw = matcher.group(1)?.trim().orEmpty()
+        if (raw.isEmpty()) return null
+        val root = parseJsonObj(raw) ?: return null
+        val module = root.jObj("ItemModule") ?: return null
+        // 任取一个条目（页面只会渲染一个作品）
+        return module.entrySet().firstOrNull()?.value?.asObjOrNull()
+    }
+
+    private val ITEM_SCOPE_KEYS = arrayOf(
+        "webapp.video-detail",
+        "webapp.reflow.video.detail"
+    )
 
     /** 解析 Set-Cookie 头为 name=value 对（TikTok 会用 HttpOnly 等属性包装） */
     fun parseSetCookie(header: String): Pair<String, String>? {
@@ -62,6 +83,13 @@ internal object TikTokPageData {
         val value = first.substring(eq + 1).trim()
         if (name.isEmpty() || value.isEmpty()) return null
         return name to value
+    }
+
+    /** 是否为 Slardar WAF JS 挑战壳页（需真实浏览器执行 JS 才能通过，OkHttp 拿不到数据） */
+    fun isWafChallengePage(html: String): Boolean {
+        return html.contains("_wafchallengeid") ||
+            html.contains("slardar_us_waf") ||
+            html.contains("browser.web.pre.js")
     }
 
     /** 按分辨率高度生成画质标签（Unknown 用 "高清" 兜底，交给归一化排序） */

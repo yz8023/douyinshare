@@ -264,6 +264,9 @@ class ParserViewModel(application: Application) : AndroidViewModel(application) 
     private var livePhotoPlayableUrlCacheLoaded = false
     private val authorBatchManager = AuthorBatchManager(application, gson, client, historyRepository)
     private val workWebApiBridge = DouyinAuthorWebApiBridge(application.applicationContext)
+
+    /** TikTok WebView 会话预热桥：过 Slardar WAF 挑战后收割 Cookie 供内置解析复用 */
+    private val tikTokWebSessionBridge = TikTokWebSessionBridge(application.applicationContext)
     private val localParseEngine by lazy { LocalParseEngine(application) }
     private var parseJob: Job? = null
     private var batchParseJob: Job? = null
@@ -1033,6 +1036,13 @@ private suspend fun performParse(input: String, useCookie: Boolean = false): Par
                 ServerConfigStore.internalBaseUrl() ?: cfg.apiBase
             } else {
                 null
+            }
+            // TikTok 走内置通道前先确保 WebView 会话就绪，过 WAF 后再请求，避免命中风控壳页
+            if (
+                looksLikeTiktokInput(input) &&
+                ServerConfigStore.isInternal(baseOverride ?: cfg.apiBase)
+            ) {
+                tikTokWebSessionBridge.ensureWarmed()
             }
             val serverResult = ServerApiClient.parse(
                 input = input,
@@ -2574,6 +2584,7 @@ private suspend fun performParse(input: String, useCookie: Boolean = false): Par
         viewModelScope.launch {
             authorBatchManager.destroy()
             workWebApiBridge.destroy()
+            tikTokWebSessionBridge.destroy()
             localParseEngine.destroy()
         }
         super.onCleared()

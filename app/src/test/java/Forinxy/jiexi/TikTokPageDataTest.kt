@@ -154,4 +154,70 @@ class TikTokPageDataTest {
         val root = JsonParser.parseString("{\"__DEFAULT_SCOPE__\":{}}").asJsonObject
         assertNull(TikTokPageData.extractItemStruct(root))
     }
+
+    @Test
+    fun extractItemStruct_reflow_scope_supported() {
+        val root = JsonParser.parseString(
+            "{\"__DEFAULT_SCOPE__\":{\"webapp.reflow.video.detail\":" +
+                "{\"itemInfo\":{\"itemStruct\":{\"id\":\"111\",\"desc\":\"reflow\"}}}}}"
+        ).asJsonObject
+        val item = TikTokPageData.extractItemStruct(root)
+        assertEquals("111", item?.jStr("id"))
+    }
+
+    @Test
+    fun extractItemStructFromSigi_parses_item_module() {
+        val html = """
+            <html><body>
+            <script id="SIGI_STATE">{"ItemModule":{"7301":{"id":"7301","desc":"sigi video"}}}</script>
+            </body></html>
+        """.trimIndent()
+        val item = TikTokPageData.extractItemStructFromSigi(html)
+        assertEquals("7301", item?.jStr("id"))
+        assertEquals("sigi video", item?.jStr("desc"))
+    }
+
+    @Test
+    fun extractItemStructFromSigi_missing_returns_null() {
+        assertNull(TikTokPageData.extractItemStructFromSigi("<html><body>plain</body></html>"))
+        assertNull(
+            TikTokPageData.extractItemStructFromSigi(
+                "<script id=\"SIGI_STATE\">{\"ItemModule\":{}}</script>"
+            )
+        )
+    }
+
+    @Test
+    fun isWafChallengePage_detects_shell_markers() {
+        assertTrue(
+            TikTokPageData.isWafChallengePage(
+                "<script id=\"wci\" class=\"_wafchallengeid\">Please wait...</script>"
+            )
+        )
+        assertTrue(
+            TikTokPageData.isWafChallengePage(
+                "<script id=\"slardar-config\">{\"bid\":\"slardar_us_waf\"}</script>"
+            )
+        )
+        assertTrue(TikTokPageData.isWafChallengePage("<script src=\"/aweme/v1/browser.web.pre.js\">"))
+    }
+
+    @Test
+    fun isWafChallengePage_normal_page_returns_false() {
+        assertTrue(!TikTokPageData.isWafChallengePage(sampleHtml))
+    }
+
+    @Test
+    fun session_store_freshness_and_register() {
+        TikTokSessionStore.clear()
+        assertTrue(!TikTokSessionStore.hasFreshCookie())
+        TikTokSessionStore.register("ua", "tt_sc=1")
+        assertTrue(TikTokSessionStore.hasFreshCookie())
+        assertEquals("tt_sc=1", TikTokSessionStore.currentCookieHeader())
+        assertTrue(TikTokSessionStore.hasSession())
+        // 过期判定
+        assertTrue(!TikTokSessionStore.hasFreshCookie(maxAgeMs = -1L))
+        TikTokSessionStore.clear()
+        assertTrue(!TikTokSessionStore.hasSession())
+    }
 }
