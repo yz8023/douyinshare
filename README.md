@@ -97,7 +97,7 @@
 ### 步骤
 
 1. **拿到 APK**，三选一：
-   - 到 [Releases](https://github.com/kd64i/dyparse/releases) 下载 `app-release.apk`；
+   - 到 [Releases](https://github.com/kd64i/dyparse/releases) 下载最新 Release 的 APK（`app-release.apk` 或 `douyinshare-vX.Y.Z.apk`）；
    - 从 Actions 拿 debug 包：最近一次成功的 **Build** → 页面底部 **Artifacts** → `app-debug`（需登录 GitHub）；
    - 自己构建，见[快速开始](#快速开始)。
 2. **（可选）部署服务端**：按 [`server/README.md`](server/README.md) 把 `data.php`、`author_list.php`、`abogus.php`、`config.php` 上传到你的虚拟主机。
